@@ -1,10 +1,11 @@
-import { LayoutDashboard, Users, Banknote, Megaphone, Package, Calendar, MessageSquare } from 'lucide-react'; //
+import { LayoutDashboard, Users, Banknote, Megaphone, Package, Calendar, MessageSquare, Activity } from 'lucide-react'; //
 import { Link, useLocation } from 'react-router-dom';
 
 const menuItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
   { icon: Calendar, label: 'Agenda', path: '/agenda' },
   { icon: Users, label: 'Pacientes', path: '/pacientes' },
+  { icon: Activity, label: 'Odontograma', path: '/Odontograma' },
   { icon: Banknote, label: 'Financeiro', path: '/financeiro' },
   { icon: Megaphone, label: 'Marketing', path: '/marketing' },
   { icon: Package, label: 'Estoque', path: '/estoque' },

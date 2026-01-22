@@ -2,7 +2,8 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { MarketingCRM } from './pages/MarketingCRM';
 import { Dashboard } from './pages/Dashboard';
-import { AtendeChat } from './pages/AtendeChat'; //
+import { AtendeChat } from './pages/AtendeChat';
+import { Odontograma } from './pages/Odontograma'; //
 
 // Componente simples para páginas que ainda não criamos
 const PlaceholderPage = ({ title }: { title: string }) => (
@@ -32,6 +33,7 @@ function App() {
         <main className="flex-1 ml-64 transition-all duration-300">
           <Routes>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/odontograma" element={<Odontograma />} />
             <Route path="/marketing" element={<MarketingCRM />} />
             <Route path="/agenda" element={<PlaceholderPage title="Agenda Inteligente" />} />
             <Route path="/pacientes" element={<PlaceholderPage title="Gestão de Pacientes" />} />
