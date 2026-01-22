@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { MarketingCRM } from './pages/MarketingCRM';
 import { Dashboard } from './pages/Dashboard';
@@ -13,8 +13,8 @@ const PlaceholderPage = ({ title }: { title: string }) => (
       </div>
       <h2 className="text-xl font-semibold text-gray-800">Em Desenvolvimento</h2>
       <p className="text-gray-500 max-w-md mt-2">
-        Este módulo estará disponível em breve. Por enquanto, explore o módulo de 
-        <span className="text-primary font-bold"> Marketing & CRM</span>.
+        Este módulo estará disponível em breve. Por enquanto, explore a 
+        <span className="text-primary font-bold"> Dashboard</span> e o módulo de Marketing.
       </p>
     </div>
   </div>
@@ -30,11 +30,8 @@ function App() {
         {/* Conteúdo Principal (com margem para não ficar baixo da sidebar) */}
         <main className="flex-1 ml-64 transition-all duration-300">
           <Routes>
-            {/* Redireciona a home para o Marketing por enquanto, pois é o que está pronto */}
             <Route path="/" element={<Dashboard />} />
-            
             <Route path="/marketing" element={<MarketingCRM />} />
-            
             <Route path="/agenda" element={<PlaceholderPage title="Agenda Inteligente" />} />
             <Route path="/pacientes" element={<PlaceholderPage title="Gestão de Pacientes" />} />
             <Route path="/financeiro" element={<PlaceholderPage title="Controle Financeiro" />} />

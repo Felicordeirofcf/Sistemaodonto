@@ -1,6 +1,28 @@
 import { MoreHorizontal, Plus, Search, Bell, Filter, Megaphone, Calendar } from 'lucide-react';
 
-const columns = [
+// --- AQUI ESTÁ A CORREÇÃO (Tipagem) ---
+interface KanbanItem {
+  id: number;
+  name: string;
+  origin?: string;    // O ? significa que é opcional
+  time?: string;
+  status?: string;
+  date?: string;
+  info?: string;
+  tag?: string;
+  tagColor?: string;
+}
+
+interface KanbanColumn {
+  title: string;
+  color: string;
+  headerColor: string;
+  count: number;
+  items: KanbanItem[];
+}
+// --------------------------------------
+
+const columns: KanbanColumn[] = [
   {
     title: 'Novos Leads',
     color: 'border-t-4 border-blue-500',
