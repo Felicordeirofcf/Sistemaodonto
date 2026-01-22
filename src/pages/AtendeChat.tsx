@@ -4,10 +4,10 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // --- CONFIGURAÇÃO DA IA ---
 // Recomendação: Use import.meta.env.VITE_GEMINI_API_KEY para maior segurança
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || 'AIzaSyAjJAC4WCPoYRe8G9c88DTuIrvy8DveBMo'; 
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
 const MODEL_NAME = "gemini-2.5-flash";
-const genAI = new GoogleGenerativeAI(API_KEY);
+const genAI = new GoogleGenerativeAI(apiKey);
 
 const SYSTEM_PROMPT = `
 Você é a Ana, assistente virtual da clínica OdontoSys.
