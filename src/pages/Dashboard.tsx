@@ -1,104 +1,102 @@
-import { ArrowUp, ArrowDown, Calendar, Users, DollarSign, Activity } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-
-// Dados simulados para o gráfico (Receita Mensal)
-const data = [
-  { name: 'Jan', receita: 4000 },
-  { name: 'Fev', receita: 5500 },
-  { name: 'Mar', receita: 6000 },
-  { name: 'Abr', receita: 8000 },
-  { name: 'Mai', receita: 11000 },
-  { name: 'Jun', receita: 9500 },
-];
-
-const kpiCards = [
-  { title: 'Faturamento Hoje', value: 'R$ 12.500', change: '+15%', isPositive: true, icon: DollarSign, color: 'bg-blue-500' },
-  { title: 'Agendamentos', value: '18', sub: '(4 Novos)', isPositive: true, icon: Calendar, color: 'bg-purple-500' },
-  { title: 'Ticket Médio', value: 'R$ 690', change: '-2%', isPositive: false, icon: Activity, color: 'bg-orange-500' },
-  { title: 'Contas a Receber', value: 'R$ 45.000', change: '+5%', isPositive: true, icon: Users, color: 'bg-green-500' },
-];
-
-const nextAppointments = [
-  { id: 1, name: 'Ana Silva', proc: 'Harmonização Facial', time: '09:00', img: 'https://i.pravatar.cc/150?img=1' },
-  { id: 2, name: 'Pedro Rocha', proc: 'Limpeza Dental', time: '09:30', img: 'https://i.pravatar.cc/150?img=11' },
-  { id: 3, name: 'Laura Mendes', proc: 'Clareamento Dental', time: '10:15', img: 'https://i.pravatar.cc/150?img=5' },
-  { id: 4, name: 'Carlos Lima', proc: 'Implante Dentário', time: '11:00', img: 'https://i.pravatar.cc/150?img=3' },
-];
+import { Users, Calendar, DollarSign, Activity, ArrowUpRight, TrendingUp, Clock } from 'lucide-react';
 
 export function Dashboard() {
-  return (
-    <div className="p-8 w-full">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-primary">Bom dia, Dr. Fonseca</h1>
-        <p className="text-gray-500">Aqui está o resumo da sua clínica hoje.</p>
-      </div>
+  const stats = [
+    { label: 'Pacientes Hoje', value: '12', icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', change: '+2' },
+    { label: 'Faturamento Dia', value: 'R$ 4.250', icon: DollarSign, color: 'text-green-600', bg: 'bg-green-50', change: '+15%' },
+    { label: 'Agendamentos', value: '45', icon: Calendar, color: 'text-purple-600', bg: 'bg-purple-50', change: '+5' },
+    { label: 'Tratamentos', value: '8', icon: Activity, color: 'text-orange-600', bg: 'bg-orange-50', change: 'Estável' },
+  ];
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        {kpiCards.map((card, index) => (
-          <div key={index} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="text-gray-500 text-sm font-medium">{card.title}</p>
-                <h3 className="text-2xl font-bold text-slate-800 mt-1">{card.value} <span className="text-sm font-normal text-gray-400">{card.sub}</span></h3>
+  const appointments = [
+    { time: '09:00', name: 'Maria Silva', type: 'Avaliação', status: 'Confirmado' },
+    { time: '10:00', name: 'João Santos', type: 'Canal', status: 'Em andamento' },
+    { time: '11:00', name: 'Ana Costa', type: 'Limpeza', status: 'Pendente' },
+    { time: '14:00', name: 'Pedro H.', type: 'Botox', status: 'Confirmado' },
+  ];
+
+  return (
+    <div className="p-4 md:p-6 bg-gray-50 min-h-screen font-sans text-sm">
+      <header className="mb-6">
+        <h1 className="text-xl font-bold text-gray-800">Visão Geral</h1>
+        <p className="text-xs text-gray-500">Bem-vindo de volta, Dr. Fonseca.</p>
+      </header>
+
+      {/* STATS GRID - Mais compacto */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        {stats.map((stat, index) => (
+          <div key={index} className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between">
+            <div className="flex justify-between items-start mb-2">
+              <div className={`p-1.5 rounded-lg ${stat.bg} ${stat.color}`}>
+                <stat.icon size={16} />
               </div>
-              <div className={`p-2 rounded-lg ${card.color} bg-opacity-10`}>
-                <card.icon className={card.color.replace('bg-', 'text-')} size={24} />
-              </div>
+              <span className="text-[10px] font-medium bg-gray-50 px-1.5 py-0.5 rounded text-gray-600 flex items-center gap-1">
+                <TrendingUp size={10} /> {stat.change}
+              </span>
             </div>
-            
-            {card.change && (
-              <div className={`flex items-center gap-1 mt-4 text-sm font-medium ${card.isPositive ? 'text-green-600' : 'text-red-500'}`}>
-                {card.isPositive ? <ArrowUp size={16} /> : <ArrowDown size={16} />}
-                {card.change} 
-                <span className="text-gray-400 ml-1 font-normal">vs ontem</span>
-              </div>
-            )}
+            <div>
+              <h3 className="text-lg font-bold text-gray-800 leading-tight">{stat.value}</h3>
+              <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wide mt-1">{stat.label}</p>
+            </div>
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Gráfico Principal */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-          <h3 className="text-lg font-bold text-slate-800 mb-6">Receita Mensal</h3>
-          <div className="h-80 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#9ca3af'}} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{fill: '#9ca3af'}} tickFormatter={(value) => `R$${value/1000}k`} />
-                <Tooltip 
-                  cursor={{fill: '#f4f6f8'}}
-                  contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
-                />
-                <Bar dataKey="receita" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
-              </BarChart>
-            </ResponsiveContainer>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* AGENDA DO DIA */}
+        <div className="lg:col-span-2 bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-bold text-gray-800 flex items-center gap-2">
+              <Calendar size={16} className="text-gray-400"/> Agenda de Hoje
+            </h3>
+            <button className="text-xs text-primary font-medium hover:underline">Ver completa</button>
           </div>
-        </div>
-
-        {/* Lista Lateral (Próximos Atendimentos) */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-          <h3 className="text-lg font-bold text-slate-800 mb-6">Próximos Atendimentos</h3>
-          <div className="flex flex-col gap-4">
-            {nextAppointments.map((item) => (
-              <div key={item.id} className="flex items-center gap-4 p-3 hover:bg-gray-50 rounded-lg transition-colors cursor-pointer group">
-                <img src={item.img} alt={item.name} className="w-12 h-12 rounded-full object-cover border-2 border-transparent group-hover:border-primary transition-all" />
-                <div className="flex-1">
-                  <h4 className="font-bold text-slate-800">{item.name}</h4>
-                  <p className="text-sm text-gray-500">{item.proc}</p>
+          
+          <div className="space-y-2">
+            {appointments.map((app, i) => (
+              <div key={i} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-lg transition-colors border border-transparent hover:border-gray-100 group">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-bold text-gray-600 bg-gray-100 px-2 py-1 rounded">{app.time}</span>
+                  <div>
+                    <p className="font-bold text-gray-800">{app.name}</p>
+                    <p className="text-[10px] text-gray-500">{app.type}</p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-sm font-bold text-primary">{item.time}</p>
+                <div className="flex items-center gap-2">
+                   <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                     app.status === 'Confirmado' ? 'bg-green-50 text-green-700' : 
+                     app.status === 'Em andamento' ? 'bg-blue-50 text-blue-700' : 'bg-yellow-50 text-yellow-700'
+                   }`}>
+                     {app.status}
+                   </span>
+                   <button className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-gray-600">
+                     <ArrowUpRight size={14} />
+                   </button>
                 </div>
               </div>
             ))}
-            
-            <button className="w-full mt-4 py-3 bg-gray-50 text-primary font-semibold rounded-lg hover:bg-blue-50 transition-colors">
-              Ver Agenda Completa
-            </button>
           </div>
+        </div>
+
+        {/* ATIVIDADE RECENTE / LEMBRETES */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+           <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+             <Clock size={16} className="text-gray-400"/> Avisos Rápidos
+           </h3>
+           <div className="space-y-3">
+             <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+               <p className="text-xs text-blue-800 font-bold mb-1">Reposição de Estoque</p>
+               <p className="text-[10px] text-blue-600">Anestésicos acabando. Fazer pedido até sexta.</p>
+             </div>
+             <div className="p-3 bg-orange-50 rounded-lg border border-orange-100">
+               <p className="text-xs text-orange-800 font-bold mb-1">Prótese Pendente</p>
+               <p className="text-[10px] text-orange-600">Cobrar laboratório sobre o caso da D. Lourdes.</p>
+             </div>
+             <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+               <p className="text-xs text-gray-800 font-bold mb-1">Reunião Equipe</p>
+               <p className="text-[10px] text-gray-500">Quinta-feira às 08:30.</p>
+             </div>
+           </div>
         </div>
       </div>
     </div>
