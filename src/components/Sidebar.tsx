@@ -1,16 +1,18 @@
 import { useState } from 'react';
-import { LayoutDashboard, Users, Banknote, Megaphone, Package, Calendar, MessageSquare, Activity, Menu, X } from 'lucide-react';
+// CORREÇÃO: Todos os ícones importados juntos, sem "..."
+import { LayoutDashboard, Users, Banknote, Megaphone, Package, Calendar, MessageSquare, Activity, Menu, X, Sparkles } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
 const menuItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-  { icon: MessageSquare, label: 'AtendeChat AI', path: '/atende-chat' },
   { icon: Activity, label: 'Odontograma', path: '/odontograma' },
+  { icon: Sparkles, label: 'Harmonização', path: '/harmonizacao' }, // <-- Item Novo
   { icon: Calendar, label: 'Agenda', path: '/agenda' },
   { icon: Users, label: 'Pacientes', path: '/pacientes' },
   { icon: Banknote, label: 'Financeiro', path: '/financeiro' },
   { icon: Megaphone, label: 'Marketing', path: '/marketing' },
   { icon: Package, label: 'Estoque', path: '/estoque' },
+  { icon: MessageSquare, label: 'AtendeChat AI', path: '/atende-chat' },
 ];
 
 export function Sidebar() {
@@ -27,7 +29,7 @@ export function Sidebar() {
         {isOpen ? <X size={24} /> : <Menu size={24} />}
       </button>
 
-      {/* FUNDO ESCURO (Overlay) quando menu abre no mobile */}
+      {/* FUNDO ESCURO (Overlay) */}
       {isOpen && (
         <div 
           className="fixed inset-0 bg-black/50 z-40 md:hidden backdrop-blur-sm"
@@ -53,7 +55,7 @@ export function Sidebar() {
               <Link
                 key={item.label}
                 to={item.path}
-                onClick={() => setIsOpen(false)} // Fecha o menu ao clicar no link (mobile)
+                onClick={() => setIsOpen(false)}
                 className={`flex items-center gap-3 px-6 py-4 transition-all duration-200 border-l-4 ${
                   isActive 
                     ? 'bg-secondary border-accent text-white' 

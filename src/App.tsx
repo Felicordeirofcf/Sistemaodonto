@@ -4,6 +4,9 @@ import { MarketingCRM } from './pages/MarketingCRM';
 import { Dashboard } from './pages/Dashboard';
 import { AtendeChat } from './pages/AtendeChat';
 import { Odontograma } from './pages/Odontograma';
+import { Financeiro } from './pages/Financeiro';
+import { Agenda } from './pages/Agenda';
+import { Harmonizacao } from './pages/Harmonizacao';
 
 // Componente Placeholder simples para páginas em construção
 const PlaceholderPage = ({ title }: { title: string }) => (
@@ -27,10 +30,11 @@ function App() {
             <Route path="/atende-chat" element={<AtendeChat />} />
             <Route path="/odontograma" element={<Odontograma />} />
             <Route path="/marketing" element={<MarketingCRM />} />
+            <Route path="/harmonizacao" element={<Harmonizacao />} />
             
-            <Route path="/agenda" element={<PlaceholderPage title="Agenda Inteligente" />} />
+            <Route path="/agenda" element={<Agenda />} />
             <Route path="/pacientes" element={<PlaceholderPage title="Gestão de Pacientes" />} />
-            <Route path="/financeiro" element={<PlaceholderPage title="Controle Financeiro" />} />
+            <Route path="/financeiro" element={<Financeiro />} />
             <Route path="/estoque" element={<PlaceholderPage title="Controle de Estoque" />} />
           </Routes>
         </main>
