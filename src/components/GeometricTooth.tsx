@@ -1,6 +1,4 @@
-import React from 'react';
-
-// Exportando os Tipos (Essencial)
+// --- REMOVI O IMPORT DO REACT QUE DAVA ERRO ---
 export type ToothFace = 'occlusal' | 'vestibular' | 'lingual' | 'mesial' | 'distal';
 
 export type ToothState = {
@@ -13,7 +11,6 @@ interface GeometricToothProps {
   onFaceClick: (face: ToothFace) => void;
 }
 
-// Exportando o Componente
 export function GeometricTooth({ id, data, onFaceClick }: GeometricToothProps) {
   
   const getColor = (face: ToothFace) => {
