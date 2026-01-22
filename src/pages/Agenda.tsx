@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Calendar as CalIcon, ChevronLeft, ChevronRight, Clock, Plus, User, Check, X, AlertCircle } from 'lucide-react';
+import { Calendar as CalIcon, ChevronLeft, ChevronRight, Clock, Plus, Check, AlertCircle } from 'lucide-react';
 
 // Tipos
 type Status = 'confirmed' | 'pending' | 'canceled' | 'completed';
@@ -15,10 +15,10 @@ interface Appointment {
 }
 
 export function Agenda() {
-  const [currentDate, setCurrentDate] = useState(new Date());
+  // Removi o currentDate pois era estático na visualização
   
-  // Simulação de Dados (Banco de Dados Fake)
-  const [appointments, setAppointments] = useState<Appointment[]>([
+  // Simulação de Dados (Banco de Dados Fake) - Removi o setAppointments pois não estamos alterando dados ainda
+  const [appointments] = useState<Appointment[]>([
     { id: '1', patient: 'Ana Julia', procedure: 'Clareamento', day: 1, hour: 9, duration: 1, status: 'confirmed' },
     { id: '2', patient: 'Carlos D.', procedure: 'Extração Sis', day: 1, hour: 14, duration: 2, status: 'confirmed' },
     { id: '3', patient: 'Marcos P.', procedure: 'Avaliação', day: 2, hour: 10, duration: 1, status: 'pending' },
@@ -113,13 +113,10 @@ export function Agenda() {
             {weekDays.map(dayInfo => (
               <div key={dayInfo.day} className="border-r border-gray-100 last:border-0 relative bg-white">
                 {hours.map(hour => {
-                  // Verificar se tem agendamento neste dia/hora
                   const appt = appointments.find(a => a.day === dayInfo.day && a.hour === hour);
                   
                   return (
                     <div key={`${dayInfo.day}-${hour}`} className="h-24 border-b border-gray-50 border-dashed relative group hover:bg-gray-50 transition-colors">
-                      
-                      {/* Botão flutuante para adicionar (só aparece no hover) */}
                       {!appt && (
                         <button className="absolute inset-0 w-full h-full opacity-0 group-hover:opacity-100 flex items-center justify-center">
                           <div className="bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-xs font-bold shadow-sm border border-blue-100">
@@ -128,11 +125,10 @@ export function Agenda() {
                         </button>
                       )}
 
-                      {/* Card do Agendamento (se existir) */}
                       {appt && (
                         <div 
                           className={`absolute inset-x-1 inset-y-1 rounded-lg p-2 border-l-4 shadow-sm cursor-pointer hover:shadow-md transition-all z-10 ${getStatusColor(appt.status)}`}
-                          style={{ height: `${appt.duration * 96 - 8}px` }} // Altura dinâmica baseada na duração
+                          style={{ height: `${appt.duration * 96 - 8}px` }} 
                         >
                           <div className="flex justify-between items-start">
                             <span className="text-xs font-bold truncate flex items-center gap-1">

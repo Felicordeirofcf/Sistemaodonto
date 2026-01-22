@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import { 
-  DollarSign, TrendingUp, TrendingDown, Wallet, 
-  Calendar, ArrowUpRight, ArrowDownRight, Filter, Download 
+  TrendingUp, TrendingDown, Wallet, 
+  ArrowUpRight, ArrowDownRight, Filter, Download 
 } from 'lucide-react';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
 } from 'recharts';
 
 export function Financeiro() {
-  // Dados Simulados para o Gráfico
   const data = [
     { name: 'Jan', entrada: 12500, saida: 4200 },
     { name: 'Fev', entrada: 15000, saida: 5100 },
@@ -18,7 +17,6 @@ export function Financeiro() {
     { name: 'Jun', entrada: 25400, saida: 8200 },
   ];
 
-  // Dados Simulados para a Tabela
   const transactions = [
     { id: 1, paciente: 'Maria Silva', proc: 'Implante Dentário', valor: 3500, tipo: 'entrada', status: 'pago', data: '22/06/2026' },
     { id: 2, paciente: 'Dental Cremer', proc: 'Compra de Materiais', valor: 1250, tipo: 'saida', status: 'pago', data: '21/06/2026' },
@@ -31,8 +29,6 @@ export function Financeiro() {
 
   return (
     <div className="p-6 md:p-8 bg-gray-50 min-h-screen">
-      
-      {/* CABEÇALHO */}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-800">Financeiro</h1>
@@ -49,10 +45,7 @@ export function Financeiro() {
         </div>
       </header>
 
-      {/* CARDS DE RESUMO */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        
-        {/* Card 1: Faturamento */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
           <div className="flex justify-between items-start">
             <div>
@@ -68,7 +61,6 @@ export function Financeiro() {
           </div>
         </div>
 
-        {/* Card 2: Despesas */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <div className="flex justify-between items-start">
             <div>
@@ -84,7 +76,6 @@ export function Financeiro() {
           </div>
         </div>
 
-        {/* Card 3: Saldo */}
         <div className="bg-gradient-to-br from-gray-900 to-gray-800 p-6 rounded-2xl shadow-lg text-white">
           <div className="flex justify-between items-start">
             <div>
@@ -102,8 +93,6 @@ export function Financeiro() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* GRÁFICO (Ocupa 2 colunas) */}
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <div className="flex justify-between items-center mb-6">
             <h3 className="font-bold text-gray-800">Evolução Semestral</h3>
@@ -140,7 +129,6 @@ export function Financeiro() {
           </div>
         </div>
 
-        {/* LISTA DE TRANSAÇÕES RECENTES */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <h3 className="font-bold text-gray-800 mb-6">Últimos Lançamentos</h3>
           <div className="space-y-4">
