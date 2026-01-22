@@ -1,9 +1,7 @@
 import { useState } from 'react';
-// MUDANÇA IMPORTANTE AQUI 👇: Adicionei 'type' antes dos tipos
 import { GeometricTooth, type ToothFace, type ToothState } from '../components/GeometricTooth';
 import { Save, User, Eraser, AlertCircle, CheckCircle, Activity } from 'lucide-react';
 
-// Tipos locais
 type TreatmentType = 'caries' | 'restoration' | 'canal' | 'extraction' | 'implant' | null;
 
 interface FullMouthState {
@@ -53,39 +51,38 @@ export function Odontograma() {
   );
 
   return (
-    <div className="flex h-screen bg-gray-100">
+    // MUDANÇA: flex-col (vertical) no mobile, md:flex-row (horizontal) no PC
+    <div className="flex flex-col md:flex-row h-screen bg-gray-100 overflow-hidden">
       
-      {/* LADO ESQUERDO: Mapa Visual */}
-      <div className="flex-1 p-8 overflow-y-auto">
-        <header className="mb-8 flex justify-between items-center">
+      {/* LADO ESQUERDO (Mapa): Ordem 2 no mobile (embaixo), Ordem 1 no PC */}
+      <div className="flex-1 p-4 md:p-8 overflow-y-auto order-2 md:order-1 pb-24">
+        <header className="mb-4 md:mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
              <h1 className="text-2xl font-bold text-gray-800">Odontograma Avançado</h1>
              <p className="text-gray-500 flex items-center gap-2 text-sm mt-1">
-               <User size={14}/> Paciente: Carlos Eduardo (Prontuário #1029)
+               <User size={14}/> Paciente: Carlos Eduardo
              </p>
           </div>
-          <button className="bg-primary text-white px-6 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 shadow-lg shadow-blue-200">
-            <Save size={18} /> Salvar Evolução
+          <button className="w-full md:w-auto bg-primary text-white px-6 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-blue-700 shadow-lg shadow-blue-200">
+            <Save size={18} /> Salvar
           </button>
         </header>
 
-        <div className="bg-white p-10 rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center gap-8 min-h-[500px] justify-center">
+        <div className="bg-white p-4 md:p-10 rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center gap-8 min-h-[400px] justify-center">
             
-            <div className={`px-4 py-2 rounded-full text-sm font-bold mb-4 ${
-                selectedTool ? 'bg-blue-100 text-blue-700 animate-pulse' : 'bg-gray-100 text-gray-500'
+            <div className={`px-4 py-2 rounded-full text-xs md:text-sm font-bold mb-4 text-center ${
+                selectedTool ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'
             }`}>
                 {selectedTool 
-                  ? 'Modo de Pintura Ativo: Clique nas partes do dente' 
-                  : 'Selecione uma ferramenta ao lado para começar'}
+                  ? 'Modo Pintura Ativo' 
+                  : 'Selecione uma ferramenta'}
             </div>
 
-            {/* Arcada Superior */}
+            {/* Arcadas com wrap para não quebrar no mobile */}
             <div className="flex gap-1 justify-center flex-wrap max-w-4xl">
                 {upperArcade.map(id => (
                     <GeometricTooth 
-                        key={id} 
-                        id={id} 
-                        data={mouth[id] || {}} 
+                        key={id} id={id} data={mouth[id] || {}} 
                         onFaceClick={(face) => handleToothClick(id, face)} 
                     />
                 ))}
@@ -93,13 +90,10 @@ export function Odontograma() {
 
             <div className="w-full max-w-4xl border-t-2 border-dashed border-gray-200 my-2"></div>
 
-            {/* Arcada Inferior */}
             <div className="flex gap-1 justify-center flex-wrap max-w-4xl">
                 {lowerArcade.map(id => (
                     <GeometricTooth 
-                        key={id} 
-                        id={id} 
-                        data={mouth[id] || {}} 
+                        key={id} id={id} data={mouth[id] || {}} 
                         onFaceClick={(face) => handleToothClick(id, face)} 
                     />
                 ))}
@@ -107,33 +101,26 @@ export function Odontograma() {
         </div>
       </div>
 
-      {/* LADO DIREITO: Ferramentas */}
-      <aside className="w-80 bg-white border-l border-gray-200 p-6 shadow-xl z-20">
-        <h2 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
-            <Activity className="text-primary"/> Ferramentas
-        </h2>
+      {/* LADO DIREITO (Ferramentas): Ordem 1 no mobile (em cima), Ordem 2 no PC */}
+      <aside className="w-full md:w-80 bg-white border-l border-gray-200 p-4 md:p-6 shadow-xl z-20 order-1 md:order-2 overflow-x-auto md:overflow-visible">
+        <div className="flex md:flex-col gap-3 min-w-max md:min-w-0">
+            {/* Cabeçalho some no mobile pra economizar espaço */}
+            <h2 className="hidden md:flex text-lg font-bold text-gray-800 mb-2 items-center gap-2">
+                <Activity className="text-primary"/> Ferramentas
+            </h2>
 
-        <div className="space-y-3">
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Tratamentos</p>
-            <ToolButton type="caries" label="Cárie / Lesão" color="#ef4444" icon={AlertCircle} />
-            <ToolButton type="restoration" label="Restauração" color="#3b82f6" icon={CheckCircle} />
-            <ToolButton type="canal" label="Canal (Endo)" color="#22c55e" icon={Activity} />
-            <ToolButton type="implant" label="Implante" color="#a855f7" icon={Activity} />
-            <ToolButton type="extraction" label="Extração (X)" color="#1f2937" icon={Activity} />
-
-            <div className="h-4"></div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Correção</p>
-            
-            <button
-                onClick={() => setSelectedTool(null)}
-                className={`w-full p-3 rounded-lg flex items-center gap-3 border transition-all ${
-                    selectedTool === null 
-                    ? 'bg-gray-100 text-gray-800 border-gray-300 ring-2 ring-gray-200' 
-                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                }`}
-            >
-                <Eraser size={18} /> Borracha / Limpar
-            </button>
+            {/* Botões horizontais no mobile, verticais no PC */}
+            <div className="flex md:flex-col gap-2">
+              <ToolButton type="caries" label="Cárie" color="#ef4444" icon={AlertCircle} />
+              <ToolButton type="restoration" label="Restauro" color="#3b82f6" icon={CheckCircle} />
+              <ToolButton type="canal" label="Canal" color="#22c55e" icon={Activity} />
+              <ToolButton type="implant" label="Implante" color="#a855f7" icon={Activity} />
+              <ToolButton type="extraction" label="Extração" color="#1f2937" icon={Activity} />
+              
+              <button onClick={() => setSelectedTool(null)} className={`p-3 rounded-lg flex items-center justify-center gap-2 border ${selectedTool === null ? 'bg-gray-200' : 'bg-white'}`}>
+                  <Eraser size={18} /> <span className="hidden md:inline">Borracha</span>
+              </button>
+            </div>
         </div>
       </aside>
     </div>
