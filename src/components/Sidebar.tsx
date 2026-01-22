@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, Banknote, Megaphone, Package, Calendar } from 'lucide-react';
+import { LayoutDashboard, Users, Banknote, Megaphone, Package, Calendar, MessageSquare } from 'lucide-react'; //
 import { Link, useLocation } from 'react-router-dom';
 
 const menuItems = [
@@ -8,6 +8,7 @@ const menuItems = [
   { icon: Banknote, label: 'Financeiro', path: '/financeiro' },
   { icon: Megaphone, label: 'Marketing', path: '/marketing' },
   { icon: Package, label: 'Estoque', path: '/estoque' },
+  { icon: MessageSquare, label: 'AtendeChat AI', path: '/atende-chat' },
 ];
 
 export function Sidebar() {

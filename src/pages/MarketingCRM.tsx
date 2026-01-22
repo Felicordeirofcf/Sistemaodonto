@@ -1,10 +1,10 @@
 import { MoreHorizontal, Plus, Search, Bell, Filter, Megaphone, Calendar } from 'lucide-react';
 
-// --- AQUI ESTÁ A CORREÇÃO (Tipagem) ---
+// --- DEFINIÇÃO DE TIPOS (Para o TypeScript não reclamar) ---
 interface KanbanItem {
   id: number;
   name: string;
-  origin?: string;    // O ? significa que é opcional
+  origin?: string;    // O ? indica opcional
   time?: string;
   status?: string;
   date?: string;
@@ -20,7 +20,7 @@ interface KanbanColumn {
   count: number;
   items: KanbanItem[];
 }
-// --------------------------------------
+// -----------------------------------------------------------
 
 const columns: KanbanColumn[] = [
   {

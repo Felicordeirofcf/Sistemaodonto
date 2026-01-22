@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { MarketingCRM } from './pages/MarketingCRM';
 import { Dashboard } from './pages/Dashboard';
+import { AtendeChat } from './pages/AtendeChat'; //
 
 // Componente simples para páginas que ainda não criamos
 const PlaceholderPage = ({ title }: { title: string }) => (
@@ -36,6 +37,7 @@ function App() {
             <Route path="/pacientes" element={<PlaceholderPage title="Gestão de Pacientes" />} />
             <Route path="/financeiro" element={<PlaceholderPage title="Controle Financeiro" />} />
             <Route path="/estoque" element={<PlaceholderPage title="Controle de Estoque" />} />
+            <Route path="/atende-chat" element={<AtendeChat />} />
           </Routes>
         </main>
       </div>
