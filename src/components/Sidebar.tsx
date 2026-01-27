@@ -13,10 +13,11 @@ import {
   Target,
   FlaskConical,
   ShieldCheck,
-  LucideIcon
 } from 'lucide-react';
 
-// 1. Definição da Interface para os itens do Menu
+// CORREÇÃO TS1484: Importando LucideIcon como tipo explicitamente
+import type { LucideIcon } from 'lucide-react';
+
 interface SubMenuItem {
   title: string;
   path: string;
@@ -26,7 +27,7 @@ interface MenuItem {
   title: string;
   icon: LucideIcon;
   path: string;
-  submenu?: SubMenuItem[]; // O '?' indica que é opcional
+  submenu?: SubMenuItem[];
 }
 
 export function Sidebar() {
@@ -41,7 +42,6 @@ export function Sidebar() {
     navigate('/login');
   };
 
-  // 2. Tipagem explícita do Array de Menu
   const menuItems: MenuItem[] = [
     { title: 'Dashboard', icon: LayoutDashboard, path: '/' },
     { title: 'Agenda', icon: Calendar, path: '/agenda' },
@@ -97,7 +97,7 @@ export function Sidebar() {
               </Link>
               
               {item.submenu && location.pathname.startsWith(item.path) && (
-                <div className="ml-12 mt-2 space-y-2 border-l border-slate-700 pl-4 animate-in slide-in-from-left-2 duration-200">
+                <div className="ml-12 mt-2 space-y-2 border-l border-slate-700 pl-4">
                   {item.submenu.map((sub: SubMenuItem) => (
                     <Link 
                       key={sub.path} 
