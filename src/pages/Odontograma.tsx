@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { GeometricTooth } from '../components/GeometricTooth'; 
-// OBS: Removi a importação de types externos para manter a solução de emergência funcionando
 import { Save, User, Eraser, AlertCircle, CheckCircle, Activity, Info, Box, Layout, Skull } from 'lucide-react';
 import { Skull3D } from '../components/Skull3D';
 
@@ -34,18 +33,20 @@ export function Odontograma() {
 
   // 1. CARREGAR DADOS DO PACIENTE AO ABRIR (ID 1 fixo para teste)
   useEffect(() => {
-    const pacienteId = 1; // Depois isso virá da URL (ex: /odontograma/5)
+    const pacienteId = 1; 
     
-    fetch(`http://127.0.0.1:5000/api/patients/${pacienteId}`)
+    // CORREÇÃO: Usar caminho relativo para funcionar no Render
+    fetch(`/api/patients/${pacienteId}`)
       .then(res => res.json())
       .then(data => {
         if (data.error) {
-            alert("Crie um paciente primeiro na aba Pacientes!");
+            // Em produção, talvez não queira alertar sempre, mas ok para teste
+            console.log("Crie um paciente primeiro na aba Pacientes!");
             return;
         }
         setPacienteInfo({ id: data.id, nome: data.nome });
         if (data.odontogram_data) {
-            setMouth(data.odontogram_data); // Pinta os dentes salvos!
+            setMouth(data.odontogram_data); 
         }
       })
       .catch(err => console.error("Erro ao carregar paciente:", err));
@@ -55,7 +56,8 @@ export function Odontograma() {
   const handleSalvarBanco = async () => {
     setLoading(true);
     try {
-        const response = await fetch(`http://127.0.0.1:5000/api/patients/${pacienteInfo.id}/odontogram`, {
+        // CORREÇÃO: Usar caminho relativo para funcionar no Render
+        const response = await fetch(`/api/patients/${pacienteInfo.id}/odontogram`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(mouth)
@@ -188,7 +190,7 @@ export function Odontograma() {
                  {/* @ts-ignore */}
                  <Skull3D mouthData={mouth} onToothSelect={(id: number) => handleToothClick(id, 'oclusal')} />
                  <p className="text-center text-[10px] text-gray-400 mt-4">
-                    * No modo 3D, clique nos dentes para aplicar o tratamento.
+                   * No modo 3D, clique nos dentes para aplicar o tratamento.
                  </p>
               </div>
             )}
