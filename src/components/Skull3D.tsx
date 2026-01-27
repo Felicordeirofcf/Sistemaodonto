@@ -1,11 +1,26 @@
 import React, { useState, useRef } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera, Environment, ContactShadows, Float } from '@react-three/drei';
 import * as THREE from 'three';
+
+// --- CORREÇÃO: Tipos definidos localmente para evitar erro de importação ---
+type TreatmentType = 'caries' | 'restoration' | 'canal' | 'extraction' | 'implant' | null;
+
+export interface ToothState {
+  [key: string]: TreatmentType;
+}
+// --------------------------------------------------------------------------
+
+// Interface para as props
+interface Skull3DProps {
+  mouthData: Record<number, ToothState>;
+  onToothSelect: (id: number) => void;
+}
 
 // Componente para um dente com formato anatômico (Coroa + Raiz)
 function AnatomicalTooth({ position, rotation, id, onSelect, color = "white", isUpper = true }: any) {
   const [hovered, setHover] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const meshRef = useRef<THREE.Group>(null);
 
   // Cores baseadas no status
@@ -61,17 +76,23 @@ function SkullModel({ onToothSelect, mouthData }: any) {
   const getToothColor = (id: number) => {
     const data = mouthData[id];
     if (!data) return "#f8fafc"; // Branco perolado
-    if (Object.values(data).includes('extraction')) return "#1f2937";
-    if (Object.values(data).includes('caries')) return "#ef4444";
-    if (Object.values(data).includes('restoration')) return "#3b82f6";
-    if (Object.values(data).includes('canal')) return "#22c55e";
-    if (Object.values(data).includes('implant')) return "#a855f7";
+    
+    // Verifica os valores do objeto de faces
+    // Cast para garantir que o TypeScript entenda que são TreatmentTypes
+    const treatments = Object.values(data) as TreatmentType[];
+    
+    if (treatments.includes('extraction')) return "#1f2937";
+    if (treatments.includes('caries')) return "#ef4444";
+    if (treatments.includes('restoration')) return "#3b82f6";
+    if (treatments.includes('canal')) return "#22c55e";
+    if (treatments.includes('implant')) return "#a855f7";
+    
     return "#f8fafc";
   };
 
   return (
     <group>
-      {/* Base do Crânio Estilizada (Transparente e Elegante) */}
+      {/* Base do Crânio Estilizada */}
       <mesh position={[0, 0.5, -0.8]}>
         <sphereGeometry args={[2.5, 64, 64]} />
         <meshStandardMaterial 
@@ -83,7 +104,7 @@ function SkullModel({ onToothSelect, mouthData }: any) {
         />
       </mesh>
 
-      {/* Arcada Superior (Formato de U) */}
+      {/* Arcada Superior */}
       <group position={[0, 0.5, 0]}>
         {upperTeeth.map((id, i) => {
           const angle = (i / (upperTeeth.length - 1)) * Math.PI - Math.PI / 2;
@@ -105,7 +126,7 @@ function SkullModel({ onToothSelect, mouthData }: any) {
         })}
       </group>
 
-      {/* Arcada Inferior (Formato de U) */}
+      {/* Arcada Inferior */}
       <group position={[0, -0.5, 0]}>
         {lowerTeeth.map((id, i) => {
           const angle = (i / (lowerTeeth.length - 1)) * Math.PI - Math.PI / 2;
@@ -130,15 +151,15 @@ function SkullModel({ onToothSelect, mouthData }: any) {
   );
 }
 
-export function Skull3D({ onToothSelect, mouthData }: any) {
+export function Skull3D({ onToothSelect, mouthData }: Skull3DProps) {
   return (
     <div className="w-full h-[500px] bg-[#fdfdfd] rounded-[2.5rem] border border-gray-100 shadow-2xl overflow-hidden relative group">
       {/* Overlay de Interface */}
-      <div className="absolute top-6 left-6 z-10 flex flex-col gap-2">
+      <div className="absolute top-6 left-6 z-10 flex flex-col gap-2 pointer-events-none">
         <span className="px-4 py-1.5 bg-white/90 backdrop-blur-md text-blue-600 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] border border-blue-50 shadow-xl">
           Precision 3D Engine
         </span>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
           <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
           <span className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Live Sync Active</span>
         </div>
@@ -154,10 +175,9 @@ export function Skull3D({ onToothSelect, mouthData }: any) {
           autoRotate={false}
         />
         
-        {/* Iluminação de Estúdio */}
         <ambientLight intensity={0.7} />
         <spotLight position={[10, 15, 10]} angle={0.3} penumbra={1} intensity={2} castShadow />
-        <pointLight position={[-10, -10, -10]} color="#blue" intensity={0.5} />
+        <pointLight position={[-10, -10, -10]} color="blue" intensity={0.5} />
         <directionalLight position={[0, 5, 5]} intensity={0.5} />
         
         <Float speed={1.5} rotationIntensity={0.2} floatIntensity={0.5}>
@@ -175,7 +195,7 @@ export function Skull3D({ onToothSelect, mouthData }: any) {
       </Canvas>
 
       {/* Controles de Navegação */}
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex gap-4 bg-white/80 backdrop-blur-xl px-6 py-3 rounded-2xl border border-white/50 shadow-2xl opacity-0 group-hover:opacity-100 transition-all duration-500 translate-y-4 group-hover:translate-y-0">
+      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex gap-4 bg-white/80 backdrop-blur-xl px-6 py-3 rounded-2xl border border-white/50 shadow-2xl opacity-0 group-hover:opacity-100 transition-all duration-500 translate-y-4 group-hover:translate-y-0 pointer-events-none">
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-gray-300"></div>
           <span className="text-[9px] font-bold text-gray-500 uppercase">Orbit</span>
