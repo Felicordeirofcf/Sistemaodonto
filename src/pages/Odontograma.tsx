@@ -44,6 +44,7 @@ export function Odontograma() {
   const handleSelectPatient = (id: string) => {
     setPacienteId(id);
     const paciente = listaPacientes.find(p => p.id === parseInt(id));
+    // CORREÇÃO: Inicialização segura do odontograma_data
     if (paciente && paciente.odontogram_data) {
       setMouth(paciente.odontogram_data);
     } else {
@@ -56,7 +57,7 @@ export function Odontograma() {
     
     setLoading(true);
     try {
-      await fetch(`/api/patients/${pacienteId}`, {
+      const response = await fetch(`/api/patients/${pacienteId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -64,6 +65,8 @@ export function Odontograma() {
         },
         body: JSON.stringify({ odontogram_data: mouth })
       });
+      
+      if (!response.ok) throw new Error();
       alert("Odontograma salvo com sucesso!");
     } catch (error) {
       alert("Erro ao salvar.");
@@ -73,7 +76,8 @@ export function Odontograma() {
   };
 
   const handleToothClick = (toothId: number, face: ToothFace) => {
-    if (selectedTool === undefined && selectedTool !== null) return;
+    // CORREÇÃO: Impedir ações se nenhum paciente estiver selecionado
+    if (!pacienteId) return;
 
     setMouth(prev => {
       const toothState = prev[toothId] || {};
@@ -91,7 +95,6 @@ export function Odontograma() {
     });
   };
 
-  // Ícones inline para evitar erros de referência
   const AlertCircleIcon = () => <div className="w-3 h-3 rounded-full border border-current" />;
   const BoxIcon = () => <div className="w-3 h-3 border border-current" />;
   const ActivityIcon = () => <div className="w-3 h-3 border-b-2 border-current" />;
@@ -181,7 +184,7 @@ export function Odontograma() {
                             <GeometricTooth 
                               key={id} 
                               id={id} 
-                              state={mouth?.[id] || {}} // CORREÇÃO: Optional chaining + fallback
+                              state={mouth?.[id] || {}} 
                               onClick={handleToothClick} 
                             />
                         ))}
@@ -191,7 +194,7 @@ export function Odontograma() {
                             <GeometricTooth 
                               key={id} 
                               id={id} 
-                              state={mouth?.[id] || {}} // CORREÇÃO: Optional chaining + fallback
+                              state={mouth?.[id] || {}} 
                               onClick={handleToothClick} 
                             />
                         ))}
@@ -199,7 +202,8 @@ export function Odontograma() {
                 </div>
             ) : (
                 <div className="w-full h-full flex items-center justify-center">
-                    <Skull3D />
+                    {/* CORREÇÃO: Passando mouthData e onToothSelect com fallback para evitar o erro undefined */}
+                    <Skull3D mouthData={mouth || {}} onToothSelect={(id) => console.log(id)} />
                 </div>
             )}
         </div>
