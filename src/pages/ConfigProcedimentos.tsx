@@ -1,17 +1,32 @@
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, Save, Package } from 'lucide-react';
 
+// 1. Definição das Interfaces para o TS
+interface InsumoNoProcedimento {
+  inventory_item_id: string;
+  quantity: number;
+}
+
+interface ItemEstoque {
+  id: string;
+  name: string;
+}
+
 export function ConfigProcedimentos() {
-  const [itemsEstoque, setItemsEstoque] = useState([]);
+  // 2. Tipagem dos States
+  const [itemsEstoque, setItemsEstoque] = useState<ItemEstoque[]>([]);
   const [nomeProc, setNomeProc] = useState('');
   const [precoProc, setPrecoProc] = useState('');
-  const [insumosSelecionados, setInsumosSelecionados] = useState([]);
+  const [insumosSelecionados, setInsumosSelecionados] = useState<InsumoNoProcedimento[]>([]);
 
   useEffect(() => {
-    // Carrega o estoque para o dentista escolher os insumos
-    fetch('/api/stock', { headers: { 'Authorization': `Bearer ${localStorage.getItem('odonto_token')}` } })
+    fetch('/api/stock', { 
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('odonto_token')}` } 
+    })
       .then(res => res.json())
-      .then(data => setItemsEstoque(data))
+      .then(data => {
+        if (Array.isArray(data)) setItemsEstoque(data);
+      })
       .catch(console.error);
   }, []);
 
@@ -19,22 +34,40 @@ export function ConfigProcedimentos() {
     setInsumosSelecionados([...insumosSelecionados, { inventory_item_id: '', quantity: 1 }]);
   };
 
+  const atualizarInsumo = (index: number, campo: keyof InsumoNoProcedimento, valor: string | number) => {
+    const novosInsumos = [...insumosSelecionados];
+    novosInsumos[index] = { ...novosInsumos[index], [campo]: valor };
+    setInsumosSelecionados(novosInsumos);
+  };
+
   const salvarProcedimento = async () => {
+    if (!nomeProc || !precoProc) return alert("Preencha o nome e o preço!");
+
     const payload = {
       name: nomeProc,
       price: parseFloat(precoProc),
       items: insumosSelecionados
     };
 
-    await fetch('/api/procedures', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('odonto_token')}`
-      },
-      body: JSON.stringify(payload)
-    });
-    alert("Procedimento salvo! Agora a baixa de estoque será automática.");
+    try {
+      const res = await fetch('/api/procedures', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('odonto_token')}`
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      if (res.ok) {
+        alert("Procedimento salvo! Agora a baixa de estoque será automática.");
+        setNomeProc('');
+        setPrecoProc('');
+        setInsumosSelecionados([]);
+      }
+    } catch (error) {
+      alert("Erro ao salvar procedimento.");
+    }
   };
 
   return (
@@ -49,6 +82,7 @@ export function ConfigProcedimentos() {
             value={nomeProc} onChange={e => setNomeProc(e.target.value)}
           />
           <input 
+            type="number"
             className="p-3 border rounded-xl" 
             placeholder="Preço de Venda (R$)"
             value={precoProc} onChange={e => setPrecoProc(e.target.value)}
@@ -63,24 +97,20 @@ export function ConfigProcedimentos() {
           <div key={index} className="flex gap-4 mb-3 items-center">
             <select 
               className="flex-1 p-2 border rounded-lg"
-              onChange={e => {
-                const newArr = [...insumosSelecionados];
-                newArr[index].inventory_item_id = e.target.value;
-                setInsumosSelecionados(newArr);
-              }}
+              value={insumo.inventory_item_id}
+              onChange={e => atualizarInsumo(index, 'inventory_item_id', e.target.value)}
             >
               <option value="">Selecione o Insumo...</option>
-              {itemsEstoque.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+              {itemsEstoque.map(item => (
+                <option key={item.id} value={item.id}>{item.name}</option>
+              ))}
             </select>
             <input 
               type="number" 
               className="w-24 p-2 border rounded-lg" 
               placeholder="Qtd"
-              onChange={e => {
-                const newArr = [...insumosSelecionados];
-                newArr[index].quantity = parseFloat(e.target.value);
-                setInsumosSelecionados(newArr);
-              }}
+              value={insumo.quantity}
+              onChange={e => atualizarInsumo(index, 'quantity', parseFloat(e.target.value))}
             />
             <button onClick={() => setInsumosSelecionados(insumosSelecionados.filter((_, i) => i !== index))}>
               <Trash2 size={18} className="text-red-400" />
@@ -97,7 +127,7 @@ export function ConfigProcedimentos() {
 
         <button 
           onClick={salvarProcedimento}
-          className="w-full mt-10 bg-blue-600 text-white p-4 rounded-xl font-bold flex items-center justify-center gap-2"
+          className="w-full mt-10 bg-blue-600 text-white p-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-hover hover:bg-blue-700"
         >
           <Save size={20}/> Salvar Configuração de Procedimento
         </button>
