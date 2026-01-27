@@ -65,6 +65,11 @@ def create_app():
 
     from .routes.marketing_routes import marketing_bp
     app.register_blueprint(marketing_bp, url_prefix='/api')
+    from .routes.agenda_routes import agenda_bp
+    app.register_blueprint(agenda_bp, url_prefix='/api')
+
+    from .routes.financial_routes import financial_bp
+    app.register_blueprint(financial_bp, url_prefix='/api')
 
     # --- ROTEAMENTO SPA (FRONTEND REACT) ---
     
@@ -90,5 +95,7 @@ def create_app():
         if request.path.startswith('/api') or request.path.startswith('/auth'):
             return jsonify({'error': 'Not found'}), 404
         return app.send_static_file('index.html')
+    
+    
 
     return app

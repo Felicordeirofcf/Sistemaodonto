@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { 
-  Users, DollarSign, Calendar, Activity, 
+  Users, DollarSign, Activity, 
   TrendingUp, TrendingDown, Clock, ArrowRight 
 } from 'lucide-react';
 import { 
@@ -22,7 +22,7 @@ export function Dashboard() {
     active_treatments: 0
   });
 
-  // Dados fictícios para o gráfico (até implementarmos o histórico real)
+  // Dados fictícios para o gráfico (será substituído por dados reais futuramente)
   const data = [
     { name: 'Seg', valor: 4000 },
     { name: 'Ter', valor: 3000 },
@@ -32,16 +32,23 @@ export function Dashboard() {
     { name: 'Sab', valor: 2390 },
   ];
 
+  // Carrega os dados do Backend
   useEffect(() => {
     const token = localStorage.getItem('odonto_token');
-    fetch('/api/dashboard/stats', {
-        headers: { 'Authorization': `Bearer ${token}` }
-    })
-      .then(res => res.json())
-      .then(data => setStats(data))
-      .catch(err => console.error("Erro ao carregar dashboard:", err));
+    if (token) {
+      fetch('/api/dashboard/stats', {
+          headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(res => {
+          if (!res.ok) throw new Error('Falha ao buscar dados');
+          return res.json();
+        })
+        .then(data => setStats(data))
+        .catch(err => console.error("Erro ao carregar dashboard:", err));
+    }
   }, []);
 
+  // Componente de Card Reutilizável
   const Card = ({ title, value, icon: Icon, color, trend }: any) => (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
       <div className="flex justify-between items-start mb-4">
@@ -105,7 +112,7 @@ export function Dashboard() {
             <button className="text-blue-600 text-sm font-bold hover:underline">Ver Relatório</button>
           </div>
           
-          {/* CORREÇÃO DO ERRO DE CHART: Adicionada altura fixa (h-80) */}
+          {/* CORREÇÃO DO ERRO DE CHART: Adicionada altura fixa (h-80) e w-full */}
           <div className="h-80 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={data}>
@@ -120,6 +127,7 @@ export function Dashboard() {
                 <YAxis axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} tickFormatter={(value) => `R$${value/1000}k`} />
                 <Tooltip 
                   contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}}
+                  formatter={(value: number) => [`R$ ${value}`, 'Receita']}
                 />
                 <Area type="monotone" dataKey="valor" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorValor)" />
               </AreaChart>
@@ -127,18 +135,18 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* SIDE WIDGET */}
+        {/* SIDE WIDGET (Próximas Consultas) */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <h2 className="text-lg font-bold text-gray-800 mb-4">Próximas Consultas</h2>
           <div className="space-y-4">
-             {/* Lista fake para visual */}
-             {[1,2,3].map((_, i) => (
+             {/* Lista fake para visual (futuramente virá da API /appointments) */}
+             {[1, 2, 3].map((_, i) => (
                <div key={i} className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer group">
-                  <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs">PF</div>
+                  <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs">P{i+1}</div>
                   <div className="flex-1">
-                    <h4 className="font-bold text-sm text-gray-800">Paciente Fictício</h4>
+                    <h4 className="font-bold text-sm text-gray-800">Paciente Exemplo {i+1}</h4>
                     <div className="flex items-center text-xs text-gray-500 gap-1">
-                      <Clock size={10} /> 14:00 - Limpeza
+                      <Clock size={10} /> 14:00 - Avaliação
                     </div>
                   </div>
                   <ArrowRight size={16} className="text-gray-300 group-hover:text-blue-500 transition-colors"/>
