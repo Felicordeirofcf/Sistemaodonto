@@ -12,7 +12,8 @@ import { Estoque } from './pages/Estoque';
 import { Pacientes } from './pages/Pacientes';
 import { Login } from './pages/Login';
 
-// NOVAS IMPORTAÇÕES PROFISSIONAIS
+// IMPORTAÇÕES PROFISSIONAIS E LANDING PAGE
+import { LandingPage } from './pages/LandingPage';
 import { DashboardVendas } from './pages/DashboardVendas'; 
 import { ConfigProcedimentos } from './pages/ConfigProcedimentos';
 import { MarketingCampaigns } from './pages/MarketingCampaigns';
@@ -28,7 +29,7 @@ const BloqueioPagamento = () => (
         </svg>
       </div>
       <h2 className="text-2xl font-bold text-gray-800 mb-2">Acesso Suspenso</h2>
-      <p className="text-gray-500 mb-8">Identificamos uma pendência financeira em sua assinatura. Regularize para liberar o acesso.</p>
+      <p className="text-gray-500 mb-8">Regularize sua assinatura para liberar o acesso aos dados da clínica.</p>
       <button className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all">
         Regularizar Agora
       </button>
@@ -43,7 +44,7 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     if (token) {
-      // Usamos o endpoint de status revisado
+      // Bate no endpoint de status que criamos no backend
       fetch('/auth/status', {
         headers: { 'Authorization': `Bearer ${token}` }
       })
@@ -63,14 +64,16 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* Rotas Públicas */}
+        <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
 
-        {/* --- EXCEÇÃO PARA ROTAS DE SETUP DO BACKEND --- */}
-        {/* Isso permite que você acesse as rotas de reset sem ser bloqueado pelo React */}
+        {/* Exceções para Setup do Backend (Evita redirecionamento do React) */}
         <Route path="/api/danger_reset_db" element={null} />
         <Route path="/api/setup_db" element={null} />
         
-        <Route path="/*" element={
+        {/* Rotas Protegidas do Sistema (SaaS) */}
+        <Route path="/app/*" element={
           <PrivateRoute>
             <div className="flex min-h-screen bg-white font-sans">
               <Sidebar />
@@ -89,12 +92,15 @@ function App() {
                   <Route path="/marketing" element={<MarketingCRM />} />
                   <Route path="/marketing/campanhas" element={<MarketingCampaigns />} />
                   <Route path="/atende-chat" element={<AtendeChat />} />
-                  <Route path="*" element={<Navigate to="/" replace />} />
+                  <Route path="*" element={<Navigate to="/app" replace />} />
                 </Routes>
               </main>
             </div>
           </PrivateRoute>
         } />
+
+        {/* Redirecionamento Global */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );
