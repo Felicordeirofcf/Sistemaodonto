@@ -12,14 +12,27 @@ import {
   LogOut,
   Target,
   FlaskConical,
-  ShieldCheck
+  ShieldCheck,
+  LucideIcon
 } from 'lucide-react';
+
+// 1. Definição da Interface para os itens do Menu
+interface SubMenuItem {
+  title: string;
+  path: string;
+}
+
+interface MenuItem {
+  title: string;
+  icon: LucideIcon;
+  path: string;
+  submenu?: SubMenuItem[]; // O '?' indica que é opcional
+}
 
 export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   
-  // Recupera o papel do usuário. No login, salve isso no localStorage.
   const userRole = localStorage.getItem('user_role') || 'dentist';
 
   const handleLogout = () => {
@@ -28,16 +41,15 @@ export function Sidebar() {
     navigate('/login');
   };
 
-  // Itens básicos: Acessíveis por Dentistas e Admins
-  const menuItems = [
+  // 2. Tipagem explícita do Array de Menu
+  const menuItems: MenuItem[] = [
     { title: 'Dashboard', icon: LayoutDashboard, path: '/' },
     { title: 'Agenda', icon: Calendar, path: '/agenda' },
     { title: 'Pacientes', icon: Users, path: '/pacientes' },
     { title: 'Odontograma', icon: Stethoscope, path: '/odontograma' },
   ];
 
-  // Itens de Gestão: Apenas para Admins (Donos da Clínica)
-  const adminItems = [
+  const adminItems: MenuItem[] = [
     { 
       title: 'Marketing & CRM', 
       icon: Target, 
@@ -59,15 +71,13 @@ export function Sidebar() {
 
   return (
     <aside className="fixed left-0 top-0 h-screen w-64 bg-slate-900 text-white p-4 hidden md:flex flex-col shadow-xl z-50">
-      {/* Brand / Logo */}
       <div className="flex items-center gap-3 px-2 mb-10 mt-4">
         <div className="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-900/40">
           <Stethoscope size={24} className="text-white" />
         </div>
-        <h1 className="text-xl font-bold tracking-tight">Sistema Odonto</h1>
+        <h1 className="text-xl font-bold tracking-tight text-white">Sistema Odonto</h1>
       </div>
 
-      {/* Navegação Principal */}
       <nav className="flex-1 space-y-1 overflow-y-auto pr-2 custom-scrollbar">
         {finalMenu.map((item) => {
           const isActive = location.pathname === item.path || (item.submenu && location.pathname.startsWith(item.path));
@@ -86,10 +96,9 @@ export function Sidebar() {
                 <span className="font-medium">{item.title}</span>
               </Link>
               
-              {/* Submenu dinâmico: Abre apenas se o item pai estiver ativo ou se estivermos em uma rota filha */}
               {item.submenu && location.pathname.startsWith(item.path) && (
                 <div className="ml-12 mt-2 space-y-2 border-l border-slate-700 pl-4 animate-in slide-in-from-left-2 duration-200">
-                  {item.submenu.map(sub => (
+                  {item.submenu.map((sub: SubMenuItem) => (
                     <Link 
                       key={sub.path} 
                       to={sub.path}
@@ -109,7 +118,6 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Footer / Logout */}
       <div className="pt-4 border-t border-slate-800 mt-4">
         <button
           onClick={handleLogout}

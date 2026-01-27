@@ -43,30 +43,30 @@ def move_lead(id):
     db.session.commit()
     return jsonify({'message': 'Status atualizado!'}), 200
 
-# --- NOVO: IA DE REATIVAÇÃO & LINK COM AGENDA ---
+# --- REATIVAÇÃO (RESOLVE O ERRO 404 DO LOG) ---
 
-@marketing_bp.route('/marketing/campaign/recall-candidates', methods=['GET'])
+@marketing_bp.route('/marketing/campaign/recall', methods=['GET']) # Rota corrigida para bater com o Frontend
 @jwt_required()
-def get_recall_candidates():
+def get_recall_campaign():
     user = User.query.get(get_jwt_identity())
-    # Filtro: Pacientes que não vêm há mais de 6 meses
+    
+    # Filtro: Pacientes que não vêm há mais de 6 meses (180 dias)
     six_months_ago = datetime.utcnow() - timedelta(days=180)
     
-    # Busca pacientes "sumidos"
+    # Busca pacientes "sumidos" que pertencem à clínica
     candidates = Patient.query.filter(
         Patient.clinic_id == user.clinic_id,
         Patient.last_visit <= six_months_ago
     ).all()
 
-    # Busca horários LIVRES na agenda para amanhã (Exemplo de link com agenda)
-    # Aqui o robô olha onde tem buraco na agenda do médico
+    # Inteligência de Agenda: Verifica vagas para amanhã
     amanha = datetime.utcnow().date() + timedelta(days=1)
     agendamentos_amanha = Appointment.query.filter(
         Appointment.clinic_id == user.clinic_id,
         db.func.date(Appointment.date_time) == amanha
     ).all()
     
-    # Lógica simples: Se tem menos de 5 agendamentos, sugere que há vagas
+    # Se tiver menos de 8 agendamentos, o robô sugere "vagas disponíveis"
     has_slots = len(agendamentos_amanha) < 8 
 
     output = []
@@ -76,7 +76,7 @@ def get_recall_candidates():
             'name': p.name,
             'phone': p.phone,
             'last_visit': p.last_visit.strftime('%d/%m/%Y') if p.last_visit else "Nunca",
-            'suggested_msg': f"Olá {p.name}! Notamos que sua última revisão foi em {p.last_visit.year if p.last_visit else 'algum tempo'}. O Dr. tem horários disponíveis para amanhã. Vamos garantir sua saúde bucal?" if has_slots else f"Olá {p.name}, que tal agendarmos sua limpeza preventiva?"
+            'suggested_msg': f"Olá {p.name}! Notamos que sua última revisão foi em {p.last_visit.strftime('%m/%Y') if p.last_visit else 'algum tempo'}. O Dr. tem horários disponíveis para amanhã. Vamos garantir sua saúde bucal?" if has_slots else f"Olá {p.name}, que tal agendarmos sua limpeza preventiva?"
         })
     
     return jsonify(output), 200

@@ -21,7 +21,9 @@ def get_patients():
                 'nome': p.name,
                 'cpf': p.cpf,
                 'telefone': p.phone,
+                'email': p.email,
                 'status': p.status,
+                'origem': p.source or 'Manual',
                 'ultimaConsulta': p.last_visit.strftime('%d/%m/%Y') if p.last_visit else '-'
             })
         
@@ -40,21 +42,25 @@ def create_patient():
     if not data or 'nome' not in data:
         return jsonify({'error': 'Nome é obrigatório'}), 400
 
-    new_patient = Patient(
-        name=data['nome'],
-        cpf=data.get('cpf', ''),
-        phone=data.get('telefone', ''),
-        clinic_id=current_clinic_id, # USA O ID DO TOKEN
-        status='ativo'
-    )
-    
     try:
+        new_patient = Patient(
+            name=data['nome'],
+            cpf=data.get('cpf'),
+            phone=data.get('telefone', ''),
+            email=data.get('email'),
+            address=data.get('endereco'),
+            source=data.get('origem', 'Manual'), # Essencial para o Chatbot
+            anamnese=data.get('anamnese', {}),   # Salva como JSON
+            status=data.get('status', 'ativo'),   # Agora existe no models.py
+            clinic_id=current_clinic_id
+        )
+        
         db.session.add(new_patient)
         db.session.commit()
-        return jsonify({'message': 'Paciente criado!', 'id': new_patient.id}), 201
+        return jsonify({'message': 'Paciente criado com sucesso!', 'id': new_patient.id}), 201
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f"Erro ao salvar: {str(e)}"}), 500
 
 # --- ROTA 3: PEGAR DETALHES (GET) ---
 @patient_bp.route('/patients/<int:id>', methods=['GET'])
@@ -63,7 +69,6 @@ def get_patient_details(id):
     claims = get_jwt()
     current_clinic_id = claims['clinic_id']
     
-    # Garante que o paciente pertence à clínica de quem está pedindo
     patient = Patient.query.filter_by(id=id, clinic_id=current_clinic_id).first()
     
     if not patient:
@@ -73,6 +78,10 @@ def get_patient_details(id):
         'id': patient.id,
         'nome': patient.name,
         'cpf': patient.cpf,
+        'telefone': patient.phone,
+        'email': patient.email,
+        'endereco': patient.address,
+        'anamnese': patient.anamnese or {},
         'odontogram_data': patient.odontogram_data or {}
     })
 
@@ -88,6 +97,10 @@ def save_odontogram(id):
     if not patient:
         return jsonify({'error': 'Acesso negado'}), 404
     
-    patient.odontogram_data = request.get_json()
-    db.session.commit()
-    return jsonify({'message': 'Salvo!'}), 200
+    try:
+        patient.odontogram_data = request.get_json()
+        db.session.commit()
+        return jsonify({'message': 'Odontograma salvo!'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
