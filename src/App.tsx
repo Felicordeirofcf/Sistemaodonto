@@ -28,8 +28,8 @@ const BloqueioPagamento = () => (
         </svg>
       </div>
       <h2 className="text-2xl font-bold text-gray-800 mb-2">Acesso Suspenso</h2>
-      <p className="text-gray-500 mb-8">Identificamos uma pendência financeira em sua assinatura. Regularize para liberar o acesso aos dados da clínica.</p>
-      <button className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200">
+      <p className="text-gray-500 mb-8">Identificamos uma pendência financeira em sua assinatura. Regularize para liberar o acesso.</p>
+      <button className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all">
         Regularizar Agora
       </button>
     </div>
@@ -43,18 +43,18 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     if (token) {
-      // Verifica o status da clínica no backend
-      fetch('/api/auth/status', {
+      // Usamos o endpoint de status revisado
+      fetch('/auth/status', {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       .then(res => res.json())
       .then(data => setIsActive(data.is_active))
-      .catch(() => setIsActive(true)); // Fallback em caso de erro de rede
+      .catch(() => setIsActive(true)); 
     }
   }, [token]);
 
   if (!token) return <Navigate to="/login" replace />;
-  if (isActive === false) return <BloqueioPagamento />; // Exibe o bloqueio visual
+  if (isActive === false) return <BloqueioPagamento />;
   
   return <>{children}</>;
 };
@@ -64,6 +64,11 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+
+        {/* --- EXCEÇÃO PARA ROTAS DE SETUP DO BACKEND --- */}
+        {/* Isso permite que você acesse as rotas de reset sem ser bloqueado pelo React */}
+        <Route path="/api/danger_reset_db" element={null} />
+        <Route path="/api/setup_db" element={null} />
         
         <Route path="/*" element={
           <PrivateRoute>
@@ -71,27 +76,19 @@ function App() {
               <Sidebar />
               <main className="flex-1 ml-0 md:ml-64 transition-all duration-300 w-full overflow-x-hidden">
                 <Routes>
-                  {/* Dashboards */}
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/dashboard-vendas" element={<DashboardVendas />} />
-                  
-                  {/* Operacional Odonto */}
                   <Route path="/pacientes" element={<Pacientes />} />
                   <Route path="/agenda" element={<Agenda />} />
                   <Route path="/odontograma" element={<Odontograma />} />
                   <Route path="/harmonizacao" element={<Harmonizacao />} />
-                  
-                  {/* Gestão e Configuração */}
                   <Route path="/financeiro" element={<Financeiro />} />
                   <Route path="/estoque" element={<Estoque />} />
                   <Route path="/config-procedimentos" element={<ConfigProcedimentos />} />
                   <Route path="/gestao-equipe" element={<GestaoEquipe />} />
-                  
-                  {/* Marketing e Chatbot */}
                   <Route path="/marketing" element={<MarketingCRM />} />
                   <Route path="/marketing/campanhas" element={<MarketingCampaigns />} />
                   <Route path="/atende-chat" element={<AtendeChat />} />
-
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </main>
