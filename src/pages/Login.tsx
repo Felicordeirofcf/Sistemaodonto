@@ -24,7 +24,10 @@ export function Login() {
     setLoading(true);
 
     const endpoint = isLogin ? '/login' : '/register';
-    const url = `http://127.0.0.1:5000/auth${endpoint}`;
+    
+    // --- CORREÇÃO IMPORTANTE ---
+    // Removemos "http://127.0.0.1:5000" para funcionar na Nuvem (Render)
+    const url = `/auth${endpoint}`; 
 
     try {
       const response = await fetch(url, {
@@ -40,18 +43,20 @@ export function Login() {
           // LOGIN SUCESSO: Salvar token e redirecionar
           localStorage.setItem('odonto_token', data.token);
           localStorage.setItem('odonto_user', JSON.stringify(data.user));
-          // Força recarregamento para o App pegar o estado de login (faremos isso depois)
+          
+          // Força recarregamento para o App pegar o estado de login
           window.location.href = '/'; 
         } else {
           // CADASTRO SUCESSO
-          alert('Conta criada! Faça login agora.');
-          setIsLogin(true);
+          alert('Conta criada com sucesso! Faça login agora.');
+          setIsLogin(true); // Muda para a tela de login
         }
       } else {
         alert(data.error || 'Erro na operação');
       }
     } catch (error) {
-      alert('Erro de conexão com o servidor');
+      console.error(error);
+      alert('Erro de conexão com o servidor. Tente novamente.');
     } finally {
       setLoading(false);
     }

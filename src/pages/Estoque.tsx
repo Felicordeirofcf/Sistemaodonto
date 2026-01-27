@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Package, Plus, Minus, AlertTriangle, Search, Filter, X } from 'lucide-react';
+import { Package, Plus, Minus, AlertTriangle, Search, X } from 'lucide-react';
 
 interface ItemEstoque {
   id: number;
@@ -21,13 +21,26 @@ export function Estoque() {
     nome: '', categoria: 'Material', quantidade: 0, minimo: 5, unidade: 'un' 
   });
 
+  // Helper para pegar o token
+  const getToken = () => localStorage.getItem('odonto_token');
+
   // 1. CARREGAR DADOS
   const carregarEstoque = () => {
-    fetch('/api/stock')
-      .then(res => res.json())
+    const token = getToken();
+    fetch('/api/stock', {
+        headers: { 'Authorization': `Bearer ${token}` } // <--- Token Adicionado
+    })
+      .then(res => {
+          if (res.status === 401) return []; // Se não autorizado, retorna vazio
+          return res.json();
+      })
       .then(data => {
-        setItens(data);
+        setItens(Array.isArray(data) ? data : []);
         setLoading(false);
+      })
+      .catch(err => {
+          console.error(err);
+          setLoading(false);
       });
   };
 
@@ -37,6 +50,8 @@ export function Estoque() {
 
   // 2. ATUALIZAR QUANTIDADE (+ ou -)
   const ajustarEstoque = async (id: number, delta: number) => {
+    const token = getToken();
+
     // Atualiza visualmente na hora (Otimista)
     setItens(prev => prev.map(item => {
       if (item.id === id) {
@@ -46,27 +61,48 @@ export function Estoque() {
     }));
 
     // Envia para o servidor
-    await fetch(`http://127.0.0.1:5000/api/stock/${id}/update`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ delta })
-    });
+    try {
+        // CORREÇÃO: URL Relativa e Token
+        await fetch(`/api/stock/${id}/update`, {
+            method: 'PUT',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}` 
+            },
+            body: JSON.stringify({ delta })
+        });
+    } catch (error) {
+        console.error("Erro ao atualizar estoque", error);
+        // Opcional: Reverter estado visual em caso de erro
+        carregarEstoque(); 
+    }
   };
 
   // 3. SALVAR NOVO ITEM
   const handleSalvar = async (e: React.FormEvent) => {
     e.preventDefault();
-    const response = await fetch('/api/stock', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(novoItem)
-    });
+    const token = getToken();
 
-    if (response.ok) {
-      alert('Item adicionado!');
-      setIsModalOpen(false);
-      setNovoItem({ nome: '', categoria: 'Material', quantidade: 0, minimo: 5, unidade: 'un' });
-      carregarEstoque();
+    try {
+        const response = await fetch('/api/stock', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}` // <--- Token Adicionado
+            },
+            body: JSON.stringify(novoItem)
+        });
+
+        if (response.ok) {
+            alert('Item adicionado com sucesso!');
+            setIsModalOpen(false);
+            setNovoItem({ nome: '', categoria: 'Material', quantidade: 0, minimo: 5, unidade: 'un' });
+            carregarEstoque();
+        } else {
+            alert('Erro ao adicionar item.');
+        }
+    } catch (error) {
+        alert('Erro de conexão.');
     }
   };
 
@@ -81,31 +117,31 @@ export function Estoque() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
           <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-md animate-in zoom-in-95">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">Novo Material</h2>
+              <h2 className="text-xl font-bold text-gray-800">Novo Material</h2>
               <button onClick={() => setIsModalOpen(false)}><X className="text-gray-400 hover:text-red-500"/></button>
             </div>
             <form onSubmit={handleSalvar} className="space-y-3">
-              <input required placeholder="Nome do Item" className="w-full p-2 border rounded" value={novoItem.nome} onChange={e => setNovoItem({...novoItem, nome: e.target.value})} />
+              <input required placeholder="Nome do Item" className="w-full p-2 border border-gray-200 rounded-lg" value={novoItem.nome} onChange={e => setNovoItem({...novoItem, nome: e.target.value})} />
               <div className="flex gap-2">
-                <select className="p-2 border rounded flex-1" value={novoItem.categoria} onChange={e => setNovoItem({...novoItem, categoria: e.target.value})}>
+                <select className="p-2 border border-gray-200 rounded-lg flex-1" value={novoItem.categoria} onChange={e => setNovoItem({...novoItem, categoria: e.target.value})}>
                   <option>Material</option>
                   <option>Medicamento</option>
                   <option>Descartável</option>
                   <option>Instrumental</option>
                 </select>
-                <input placeholder="Unid (ex: cx)" className="w-20 p-2 border rounded" value={novoItem.unidade} onChange={e => setNovoItem({...novoItem, unidade: e.target.value})} />
+                <input placeholder="Unid (ex: cx)" className="w-20 p-2 border border-gray-200 rounded-lg" value={novoItem.unidade} onChange={e => setNovoItem({...novoItem, unidade: e.target.value})} />
               </div>
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <label className="text-xs text-gray-500">Qtd Inicial</label>
-                  <input type="number" className="w-full p-2 border rounded" value={novoItem.quantidade} onChange={e => setNovoItem({...novoItem, quantidade: parseInt(e.target.value)})} />
+                  <label className="text-xs text-gray-500 font-semibold ml-1">Qtd Inicial</label>
+                  <input type="number" className="w-full p-2 border border-gray-200 rounded-lg" value={novoItem.quantidade} onChange={e => setNovoItem({...novoItem, quantidade: parseInt(e.target.value)})} />
                 </div>
                 <div className="flex-1">
-                  <label className="text-xs text-gray-500">Mínimo (Alerta)</label>
-                  <input type="number" className="w-full p-2 border rounded" value={novoItem.minimo} onChange={e => setNovoItem({...novoItem, minimo: parseInt(e.target.value)})} />
+                  <label className="text-xs text-gray-500 font-semibold ml-1">Mínimo (Alerta)</label>
+                  <input type="number" className="w-full p-2 border border-gray-200 rounded-lg" value={novoItem.minimo} onChange={e => setNovoItem({...novoItem, minimo: parseInt(e.target.value)})} />
                 </div>
               </div>
-              <button className="w-full bg-indigo-600 text-white py-2 rounded font-bold hover:bg-indigo-700">Salvar Item</button>
+              <button className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all mt-2">Salvar Item</button>
             </form>
           </div>
         </div>
