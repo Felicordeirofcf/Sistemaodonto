@@ -72,6 +72,13 @@ def create_app():
     from .routes.financial_routes import financial_bp
     app.register_blueprint(financial_bp, url_prefix='/api')
 
+    # --- NOVOS REGISTROS PARA RESOLVER ERROS 404 E 405 ---
+    from .routes.team_routes import team_bp
+    app.register_blueprint(team_bp, url_prefix='/api') # Resolve o 404 de Gestão de Equipe
+
+    from .routes.procedure_routes import procedure_bp
+    app.register_blueprint(procedure_bp, url_prefix='/api') # Resolve o 405 de Procedimentos
+
     # --- ROTAS DE UTILIDADE & BANCO ---
 
     @app.route('/')
@@ -89,8 +96,7 @@ def create_app():
 
     @app.route('/api/danger_reset_db')
     def danger_reset_db():
-        """APAGA TUDO e recria o banco. Use para corrigir erros de colunas no dev."""
-        # Verificação simples de segurança via query param
+        """APAGA TUDO e recria o banco."""
         confirm = request.args.get('confirm')
         if confirm != 'true':
             return jsonify({'error': 'Adicione ?confirm=true para resetar o banco'}), 403
@@ -102,7 +108,6 @@ def create_app():
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
-    # Tratamento de Erro 404 (Suporte a SPA React)
     @app.errorhandler(404)
     def not_found(e):
         if request.path.startswith('/api') or request.path.startswith('/auth'):
