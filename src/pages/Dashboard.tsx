@@ -7,22 +7,24 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
 } from 'recharts';
 
+// Interface ajustada para bater com o JSON do Backend revisado
 interface DashboardStats {
-  total_patients: number;
-  today_revenue: number;
-  low_stock_items: number;
-  active_treatments: number;
+  patients: number;
+  revenue: number;
+  low_stock: number;
+  appointments: number;
+  net_profit?: number;
 }
 
 export function Dashboard() {
   const [stats, setStats] = useState<DashboardStats>({
-    total_patients: 0,
-    today_revenue: 0,
-    low_stock_items: 0,
-    active_treatments: 0
+    patients: 0,
+    revenue: 0,
+    low_stock: 0,
+    appointments: 0,
+    net_profit: 0
   });
 
-  // Dados fictícios para o gráfico (será substituído por dados reais futuramente)
   const data = [
     { name: 'Seg', valor: 4000 },
     { name: 'Ter', valor: 3000 },
@@ -32,10 +34,10 @@ export function Dashboard() {
     { name: 'Sab', valor: 2390 },
   ];
 
-  // Carrega os dados do Backend
   useEffect(() => {
     const token = localStorage.getItem('odonto_token');
     if (token) {
+      // Endpoint revisado para bater com a rota de estatísticas
       fetch('/api/dashboard/stats', {
           headers: { 'Authorization': `Bearer ${token}` }
       })
@@ -48,7 +50,11 @@ export function Dashboard() {
     }
   }, []);
 
-  // Componente de Card Reutilizável
+  // Função para formatar moeda com segurança (evita o "undefined")
+  const formatCurrency = (value: number | undefined) => {
+    return (value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  };
+
   const Card = ({ title, value, icon: Icon, color, trend }: any) => (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
       <div className="flex justify-between items-start mb-4">
@@ -74,37 +80,35 @@ export function Dashboard() {
         <p className="text-gray-500 text-sm">Bem-vindo de volta, Dr(a). chefe.</p>
       </div>
 
-      {/* STATS CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <Card 
           title="Pacientes Totais" 
-          value={stats.total_patients} 
+          value={stats.patients} 
           icon={Users} 
           color="bg-blue-500" 
           trend={+12}
         />
         <Card 
           title="Faturamento Dia" 
-          value={`R$ ${stats.today_revenue}`} 
+          value={formatCurrency(stats.revenue)} 
           icon={DollarSign} 
           color="bg-green-500" 
           trend={+15}
         />
         <Card 
           title="Itens Baixo Estoque" 
-          value={stats.low_stock_items} 
+          value={stats.low_stock} 
           icon={Activity} 
           color="bg-orange-500" 
         />
         <Card 
           title="Tratamentos Hoje" 
-          value={stats.active_treatments} 
+          value={stats.appointments} 
           icon={Activity} 
           color="bg-purple-500" 
         />
       </div>
 
-      {/* CHART SECTION */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <div className="flex justify-between items-center mb-6">
@@ -112,7 +116,6 @@ export function Dashboard() {
             <button className="text-blue-600 text-sm font-bold hover:underline">Ver Relatório</button>
           </div>
           
-          {/* CORREÇÃO DO ERRO DE CHART: Adicionada altura fixa (h-80) e w-full */}
           <div className="h-80 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={data}>
@@ -127,7 +130,7 @@ export function Dashboard() {
                 <YAxis axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} tickFormatter={(value) => `R$${value/1000}k`} />
                 <Tooltip 
                   contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}}
-                  formatter={(value: any) => [`R$ ${value}`, 'Receita']}
+                  formatter={(value: any) => [formatCurrency(value), 'Receita']}
                 />
                 <Area type="monotone" dataKey="valor" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorValor)" />
               </AreaChart>
@@ -135,11 +138,9 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* SIDE WIDGET (Próximas Consultas) */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <h2 className="text-lg font-bold text-gray-800 mb-4">Próximas Consultas</h2>
           <div className="space-y-4">
-             {/* Lista fake para visual (futuramente virá da API /appointments) */}
              {[1, 2, 3].map((_, i) => (
                <div key={i} className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer group">
                   <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs">P{i+1}</div>
