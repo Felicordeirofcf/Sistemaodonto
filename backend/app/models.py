@@ -1,14 +1,15 @@
 from . import db
 from datetime import datetime
 
-# 1. A CLÍNICA
+# 1. A CLÍNICA (CLIENTE SAAS)
 class Clinic(db.Model):
     __tablename__ = 'clinics'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     cnpj_cpf = db.Column(db.String(20), unique=True)
     plan_type = db.Column(db.String(20), default='pro')
-    is_active = db.Column(db.Boolean, default=True) 
+    max_dentists = db.Column(db.Integer, default=1)
+    is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     users = db.relationship('User', backref='clinic', lazy=True)
@@ -29,7 +30,7 @@ class User(db.Model):
     role = db.Column(db.String(20), default='dentist')
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
 
-# 3. PACIENTES (Versão Profissional)
+# 3. PACIENTES (CORRIGIDO: Adicionado campo 'status')
 class Patient(db.Model):
     __tablename__ = 'patients'
     id = db.Column(db.Integer, primary_key=True)
@@ -39,29 +40,33 @@ class Patient(db.Model):
     email = db.Column(db.String(120))
     birth_date = db.Column(db.Date)
     address = db.Column(db.String(200))
-    source = db.Column(db.String(50)) # 'Chatbot', 'Instagram', etc.
+    source = db.Column(db.String(50))
     anamnese = db.Column(db.JSON) 
     odontogram_data = db.Column(db.JSON, nullable=True) 
     last_visit = db.Column(db.DateTime)
+    # Coluna essencial para evitar o erro TypeError
+    status = db.Column(db.String(20), default='ativo') 
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
 
-# 4. ESTOQUE
+# 4. ESTOQUE (CORRIGIDO: Adicionado min_quantity e purchase_price)
 class InventoryItem(db.Model):
     __tablename__ = 'inventory_items'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     category = db.Column(db.String(50))
     quantity = db.Column(db.Float, default=0.0)
-    purchase_price = db.Column(db.Float, default=0.0) # Para cálculo de lucro
-    unit = db.Column(db.String(20)) # un, ml, par
+    # Colunas que estavam faltando no seu banco e gerando erro 500
+    min_quantity = db.Column(db.Float, default=5.0)
+    purchase_price = db.Column(db.Float, default=0.0)
+    unit = db.Column(db.String(20))
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
 
-# 5. CONFIGURAÇÃO DE PROCEDIMENTOS (NOVO)
+# 5. CONFIGURAÇÃO DE PROCEDIMENTOS
 class Procedure(db.Model):
     __tablename__ = 'procedures'
     id = db.Column(db.Integer, primary_key=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
-    name = db.Column(db.String(100), nullable=False) # Ex: Preenchimento
+    name = db.Column(db.String(100), nullable=False)
     price = db.Column(db.Float, default=0.0)
     requirements = db.relationship('ProcedureRequirement', backref='procedure', lazy=True)
 
@@ -70,10 +75,10 @@ class ProcedureRequirement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     procedure_id = db.Column(db.Integer, db.ForeignKey('procedures.id'), nullable=False)
     inventory_item_id = db.Column(db.Integer, db.ForeignKey('inventory_items.id'), nullable=False)
-    quantity_needed = db.Column(db.Float, nullable=False) # Quantidade por procedimento
+    quantity_needed = db.Column(db.Float, nullable=False)
     item = db.relationship('InventoryItem')
 
-# 6. MARKETING / LEADS
+# 6. MARKETING / CRM
 class Lead(db.Model):
     __tablename__ = 'leads'
     id = db.Column(db.Integer, primary_key=True)
@@ -108,8 +113,8 @@ class Transaction(db.Model):
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
     description = db.Column(db.String(200), nullable=False)
     amount = db.Column(db.Float, nullable=False)
-    cost = db.Column(db.Float, default=0.0) 
-    type = db.Column(db.String(20), nullable=False) # 'income' ou 'expense'
+    cost = db.Column(db.Float, default=0.0)
+    type = db.Column(db.String(20), nullable=False)
     category = db.Column(db.String(50))
     date = db.Column(db.DateTime, default=datetime.utcnow)
     appointment_id = db.Column(db.Integer, db.ForeignKey('appointments.id'), nullable=True)
