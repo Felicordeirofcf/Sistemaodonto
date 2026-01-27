@@ -3,7 +3,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, Users, Calendar, Stethoscope, 
   DollarSign, Package, BarChart3, MessageSquare, 
-  LogOut, Target, FlaskConical, ShieldCheck 
+  LogOut, Target, FlaskConical, ShieldCheck,
+  Settings // Importação do novo ícone
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -27,10 +28,10 @@ export function Sidebar() {
   const handleLogout = () => {
     localStorage.removeItem('odonto_token');
     localStorage.removeItem('user_role');
-    navigate('/login');
+    localStorage.removeItem('odonto_user');
+    window.location.href = '/'; 
   };
 
-  // Ajustamos os caminhos para incluir o prefixo /app
   const menuItems: MenuItem[] = [
     { title: 'Dashboard', icon: LayoutDashboard, path: '/app' },
     { title: 'Agenda', icon: Calendar, path: '/app/agenda' },
@@ -54,18 +55,21 @@ export function Sidebar() {
     { title: 'Fichas Técnicas', icon: FlaskConical, path: '/app/config-procedimentos' },
     { title: 'Gestão da Equipe', icon: ShieldCheck, path: '/app/gestao-equipe' },
     { title: 'AtendeChat IA', icon: MessageSquare, path: '/app/atende-chat' },
+    
+    // NOVA ENTRADA NO MENU
+    { title: 'Configurações', icon: Settings, path: '/app/configuracoes' },
   ];
 
   const finalMenu = userRole === 'admin' ? [...menuItems, ...adminItems] : menuItems;
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 bg-slate-900 text-white p-4 hidden md:flex flex-col shadow-xl z-50">
-      <div className="flex items-center gap-3 px-2 mb-10 mt-4">
+    <aside className="fixed left-0 top-0 h-screen w-64 bg-slate-900 text-white p-4 hidden md:flex flex-col shadow-xl z-50 font-sans">
+      <Link to="/app" className="flex items-center gap-3 px-2 mb-10 mt-4 hover:opacity-80 transition-opacity">
         <div className="bg-blue-600 p-2 rounded-lg">
           <Stethoscope size={24} className="text-white" />
         </div>
         <h1 className="text-xl font-bold tracking-tight">OdontoSys</h1>
-      </div>
+      </Link>
 
       <nav className="flex-1 space-y-1 overflow-y-auto pr-2 custom-scrollbar">
         {finalMenu.map((item) => {
@@ -80,7 +84,7 @@ export function Sidebar() {
                 }`}
               >
                 <item.icon size={20} />
-                <span className="font-medium">{item.title}</span>
+                <span className="font-medium text-sm">{item.title}</span>
               </Link>
               
               {item.submenu && location.pathname.startsWith(item.path) && (
@@ -89,7 +93,9 @@ export function Sidebar() {
                     <Link 
                       key={sub.path} 
                       to={sub.path}
-                      className={`block py-1 text-sm ${location.pathname === sub.path ? 'text-blue-400 font-bold' : 'text-slate-500'}`}
+                      className={`block py-1 text-xs transition-colors ${
+                        location.pathname === sub.path ? 'text-blue-400 font-bold' : 'text-slate-500 hover:text-slate-300'
+                      }`}
                     >
                       {sub.title}
                     </Link>
@@ -102,7 +108,10 @@ export function Sidebar() {
       </nav>
 
       <div className="pt-4 border-t border-slate-800 mt-4">
-        <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-slate-400 hover:text-red-500 transition-all">
+        <button 
+          onClick={handleLogout} 
+          className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-500/10 transition-all"
+        >
           <LogOut size={20} />
           <span className="font-medium">Sair</span>
         </button>

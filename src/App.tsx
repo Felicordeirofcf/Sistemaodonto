@@ -18,6 +18,7 @@ import { DashboardVendas } from './pages/DashboardVendas';
 import { ConfigProcedimentos } from './pages/ConfigProcedimentos';
 import { MarketingCampaigns } from './pages/MarketingCampaigns';
 import { GestaoEquipe } from './pages/GestaoEquipe';
+import { Configuracoes } from './pages/Configuracoes'; // IMPORTAÇÃO DO NOVO COMPONENTE
 
 // COMPONENTE DE BLOQUEIO (UI)
 const BloqueioPagamento = () => (
@@ -44,7 +45,6 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     if (token) {
-      // Bate no endpoint de status que criamos no backend
       fetch('/auth/status', {
         headers: { 'Authorization': `Bearer ${token}` }
       })
@@ -68,7 +68,7 @@ function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
 
-        {/* Exceções para Setup do Backend (Evita redirecionamento do React) */}
+        {/* Exceções para Setup do Backend */}
         <Route path="/api/danger_reset_db" element={null} />
         <Route path="/api/setup_db" element={null} />
         
@@ -92,6 +92,10 @@ function App() {
                   <Route path="/marketing" element={<MarketingCRM />} />
                   <Route path="/marketing/campanhas" element={<MarketingCampaigns />} />
                   <Route path="/atende-chat" element={<AtendeChat />} />
+                  
+                  {/* NOVA ROTA DE CONFIGURAÇÕES */}
+                  <Route path="/configuracoes" element={<Configuracoes />} />
+                  
                   <Route path="*" element={<Navigate to="/app" replace />} />
                 </Routes>
               </main>
@@ -99,7 +103,6 @@ function App() {
           </PrivateRoute>
         } />
 
-        {/* Redirecionamento Global */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

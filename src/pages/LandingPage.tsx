@@ -1,7 +1,10 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Shield, Zap, TrendingUp, CheckCircle } from 'lucide-react';
 
 export function LandingPage() {
+  const navigate = useNavigate();
+
   return (
     <div className="bg-white text-slate-900 font-sans">
       {/* Hero Section */}
@@ -13,7 +16,11 @@ export function LandingPage() {
           O OdontoSys usa Inteligência Artificial para identificar pacientes sumidos e automatizar sua agenda.
         </p>
         <div className="flex justify-center gap-4">
-          <button className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-xl hover:bg-blue-700 transition-all">
+          {/* Agora envia o modo register para o Login.tsx abrir no cadastro */}
+          <button 
+            onClick={() => navigate('/login?mode=register')} 
+            className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-xl hover:bg-blue-700 transition-all active:scale-95"
+          >
             Começar Teste Grátis
           </button>
         </div>
@@ -61,7 +68,12 @@ export function LandingPage() {
                 <li className="flex items-center gap-2 text-sm"><CheckCircle size={16} className="text-green-500" /> IA de Reativação</li>
                 <li className="flex items-center gap-2 text-sm"><CheckCircle size={16} className="text-green-500" /> Dashboards Completos</li>
               </ul>
-              <button className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all">Assinar Agora</button>
+              <button 
+                onClick={() => navigate('/login?mode=register')} 
+                className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all active:scale-95"
+              >
+                Assinar Agora
+              </button>
             </div>
           ))}
         </div>

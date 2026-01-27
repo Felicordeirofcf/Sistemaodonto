@@ -1,18 +1,27 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Lock, Mail, ArrowRight, Loader2 } from 'lucide-react';
 
 export function Login() {
   const navigate = useNavigate();
+  const location = useLocation(); // Hook para ler parâmetros da URL
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
   
+  // Detecta se o usuário veio pelo botão "Teste Grátis" da Landing Page
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('mode') === 'register') {
+      setIsLogin(false);
+    }
+  }, [location]);
+
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     user_name: '',
     clinic_name: '',
-    plan_type: 'bronze' // Valor padrão para o SaaS
+    plan_type: 'bronze'
   });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -37,13 +46,11 @@ export function Login() {
 
       if (response.ok) {
         if (isLogin) {
-          // 1. SALVAR DADOS DE AUTENTICAÇÃO
           localStorage.setItem('odonto_token', data.token);
-          localStorage.setItem('user_role', data.role); // Essencial para a Sidebar
+          localStorage.setItem('user_role', data.role); 
           localStorage.setItem('odonto_user', JSON.stringify(data.user));
           
-          // 2. REDIRECIONAMENTO CORRETO PARA A ÁREA DO APP
-          // Não usamos '/' pois agora a raiz é a Landing Page
+          // Redireciona para a área interna do app
           window.location.href = '/app'; 
         } else {
           alert('Conta criada com sucesso! Faça login agora.');
@@ -54,7 +61,7 @@ export function Login() {
       }
     } catch (error) {
       console.error(error);
-      alert('Erro de conexão com o servidor. Tente novamente.');
+      alert('Erro de conexão com o servidor.');
     } finally {
       setLoading(false);
     }
@@ -64,7 +71,6 @@ export function Login() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-900 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex overflow-hidden min-h-[600px]">
         
-        {/* Lado Esquerdo - Formulário */}
         <div className="w-full md:w-1/2 p-8 md:p-12 flex flex-col justify-center">
           <div className="mb-8">
             <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">OdontoSys</h1>
@@ -79,7 +85,6 @@ export function Login() {
                 <input required name="user_name" placeholder="Seu Nome Completo" className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" onChange={handleChange} />
                 <input required name="clinic_name" placeholder="Nome da Clínica" className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" onChange={handleChange} />
                 
-                {/* Seleção de Plano para o Registro */}
                 <select 
                   name="plan_type" 
                   className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-600"
@@ -121,7 +126,6 @@ export function Login() {
           </div>
         </div>
 
-        {/* Lado Direito - Decorativo */}
         <div className="hidden md:flex w-1/2 bg-blue-600 relative items-center justify-center p-12 overflow-hidden">
           <div className="relative z-10 text-white">
             <h2 className="text-4xl font-bold mb-6">Gestão com IA para Odontologia</h2>
