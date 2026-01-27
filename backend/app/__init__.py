@@ -81,5 +81,27 @@ def create_app():
         if request.path.startswith('/api') or request.path.startswith('/auth'):
             return jsonify({'error': 'Not found'}), 404
         return app.send_static_file('index.html')
+    # --- ROTEAMENTO SPA (FRONTEND REACT) ---
+    @app.route('/')
+    def serve():
+        return app.send_static_file('index.html')
+
+    # ===> ADICIONE ESTE BLOCO AQUI (ROTA DE EMERGÊNCIA) <===
+    @app.route('/api/setup_db')
+    def setup_db():
+        try:
+            with app.app_context():
+                # Força a criação de todas as tabelas que estão nos Models mas não no Banco
+                db.create_all()
+                return jsonify({'message': 'Banco de dados atualizado e tabelas criadas com sucesso!'})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    # ========================================================
+
+    @app.errorhandler(404)
+    def not_found(e):
+        if request.path.startswith('/api') or request.path.startswith('/auth'):
+            return jsonify({'error': 'Not found'}), 404
+        return app.send_static_file('index.html')
 
     return app

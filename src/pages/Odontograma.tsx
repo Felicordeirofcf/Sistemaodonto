@@ -26,27 +26,36 @@ export function Odontograma() {
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
   
   // Estado para o Paciente Atual
-  const [pacienteInfo, setPacienteInfo] = useState({ id: 1, nome: 'Carregando...' });
+  const [pacienteInfo, setPacienteInfo] = useState({ id: 0, nome: 'Selecione um Paciente' });
   const [loading, setLoading] = useState(false);
 
   const upperArcade = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
   const lowerArcade = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
 
-  // 1. CARREGAR DADOS DO PACIENTE AO ABRIR (ID 1 fixo para teste)
+  // Helper para token
+  const getToken = () => localStorage.getItem('odonto_token');
+
+  // 1. CARREGAR DADOS DO PACIENTE AO ABRIR (Tenta pegar o primeiro paciente do banco)
   useEffect(() => {
-    const pacienteId = 1; 
+    const token = getToken();
     
-    // Caminho relativo para funcionar no Render
-    fetch(`/api/patients/${pacienteId}`)
+    // Primeiro, busca a lista de pacientes para pegar o primeiro ID real
+    fetch('/api/patients', {
+        headers: { 'Authorization': `Bearer ${token}` }
+    })
       .then(res => res.json())
-      .then(data => {
-        if (data.error) {
-            console.log("Crie um paciente primeiro na aba Pacientes!");
-            return;
-        }
-        setPacienteInfo({ id: data.id, nome: data.nome });
-        if (data.odontogram_data) {
-            setMouth(data.odontogram_data); 
+      .then(pacientes => {
+        if (Array.isArray(pacientes) && pacientes.length > 0) {
+            const primeiroPaciente = pacientes[0];
+            setPacienteInfo({ id: primeiroPaciente.id, nome: primeiroPaciente.nome });
+            
+            // Agora carrega o odontograma desse paciente
+            if (primeiroPaciente.odontogram_data) {
+                setMouth(primeiroPaciente.odontogram_data);
+            }
+        } else {
+            console.log("Nenhum paciente encontrado. Crie um na aba Pacientes.");
+            setPacienteInfo({ id: 0, nome: 'Cadastre um Paciente' });
         }
       })
       .catch(err => console.error("Erro ao carregar paciente:", err));
@@ -54,16 +63,26 @@ export function Odontograma() {
 
   // 2. SALVAR NO BANCO
   const handleSalvarBanco = async () => {
+    if (pacienteInfo.id === 0) {
+        alert("Cadastre um paciente primeiro na aba 'Pacientes'.");
+        return;
+    }
+
     setLoading(true);
+    const token = getToken();
+
     try {
         const response = await fetch(`/api/patients/${pacienteInfo.id}/odontogram`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}` // <--- Token Adicionado aqui
+            },
             body: JSON.stringify(mouth)
         });
         
         if (response.ok) {
-            alert("Prontuário salvo com sucesso no banco de dados!");
+            alert("Prontuário salvo com sucesso!");
         } else {
             alert("Erro ao salvar.");
         }
@@ -184,6 +203,7 @@ export function Odontograma() {
               </div>
             ) : (
               <div className="w-full h-full animate-in zoom-in-95 duration-500 p-4">
+                 {/* @ts-ignore */}
                  <Skull3D mouthData={mouth} onToothSelect={(id: number) => handleToothClick(id, 'oclusal')} />
                  <p className="text-center text-[10px] text-gray-400 mt-4">
                    * No modo 3D, clique nos dentes para aplicar o tratamento.
