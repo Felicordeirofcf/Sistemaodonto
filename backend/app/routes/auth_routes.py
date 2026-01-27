@@ -62,8 +62,8 @@ def login():
     if not user or not check_password_hash(user.password_hash, password):
         return jsonify({'error': 'Email ou senha inválidos'}), 401
         
-    if not user.clinic.is_active:
-        return jsonify({'error': 'Sua clínica está inativa'}), 403
+    if hasattr(user.clinic, 'is_active') and not user.clinic.is_active:
+        return jsonify({"msg": "Clínica inativa"}), 403
 
     # Gera o Token
     access_token = create_access_token(
