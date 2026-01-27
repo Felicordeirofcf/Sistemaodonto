@@ -1,16 +1,15 @@
-from flask import Blueprint, request, jsonify
-from app.models import InventoryItem, db
-from flask_jwt_extended import jwt_required, get_jwt
+from flask import Blueprint, jsonify, request
+from app.models import db, InventoryItem, User
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
-stock_bp = Blueprint('stock', __name__)
+stock_bp = Blueprint('stock_bp', __name__)
 
 @stock_bp.route('/stock', methods=['GET'])
 @jwt_required()
 def get_stock():
-    claims = get_jwt()
-    current_clinic_id = claims['clinic_id']
-    
-    items = InventoryItem.query.filter_by(clinic_id=current_clinic_id).all()
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+    items = InventoryItem.query.filter_by(clinic_id=user.clinic_id).all()
     
     output = []
     for i in items:
@@ -19,7 +18,7 @@ def get_stock():
             'nome': i.name,
             'categoria': i.category,
             'quantidade': i.quantity,
-            'minimo': i.min_quantity,
+            'minimo': i.min_quantity, # <--- Importante
             'unidade': i.unit
         })
     return jsonify(output), 200
@@ -27,39 +26,37 @@ def get_stock():
 @stock_bp.route('/stock', methods=['POST'])
 @jwt_required()
 def create_item():
-    claims = get_jwt()
-    current_clinic_id = claims['clinic_id']
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
     data = request.get_json()
     
     new_item = InventoryItem(
-        name=data['nome'],
-        category=data.get('categoria', 'Geral'),
+        name=data.get('nome'),
+        category=data.get('categoria', 'Material'),
         quantity=int(data.get('quantidade', 0)),
-        minimo=int(data.get('minimo', 5)), # Nota: verifique se seu modelo usa min_quantity ou minimo. Vou usar min_quantity baseado no modelo anterior.
+        min_quantity=int(data.get('minimo', 5)), # <--- CORREÇÃO: Mapeia 'minimo' para 'min_quantity'
         unit=data.get('unidade', 'un'),
-        clinic_id=current_clinic_id # ID DO TOKEN
+        clinic_id=user.clinic_id
     )
-    # Correção do nome do campo se necessário (baseado no models.py anterior era min_quantity)
-    new_item.min_quantity = int(data.get('minimo', 5))
 
-    db.session.add(new_item)
-    db.session.commit()
-    return jsonify({'message': 'Item criado!'}), 201
+    try:
+        db.session.add(new_item)
+        db.session.commit()
+        return jsonify({'message': 'Item criado com sucesso!'}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Erro ao criar item', 'details': str(e)}), 500
 
 @stock_bp.route('/stock/<int:id>/update', methods=['PUT'])
 @jwt_required()
 def update_quantity(id):
-    claims = get_jwt()
-    current_clinic_id = claims['clinic_id']
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+    item = InventoryItem.query.filter_by(id=id, clinic_id=user.clinic_id).first()
     
-    # Filtra pelo ID do item E pela clínica (segurança dupla)
-    item = InventoryItem.query.filter_by(id=id, clinic_id=current_clinic_id).first()
-    
-    if not item:
-        return jsonify({'error': 'Item não encontrado'}), 404
+    if not item: return jsonify({'error': 'Item não encontrado'}), 404
         
-    delta = request.get_json().get('delta', 0)
-    item.quantity = max(0, item.quantity + delta)
+    data = request.get_json()
+    item.quantity = max(0, item.quantity + data.get('delta', 0))
     db.session.commit()
-    
-    return jsonify({'message': 'Atualizado', 'nova_quantidade': item.quantity}), 200
+    return jsonify({'message': 'Estoque atualizado'}), 200
