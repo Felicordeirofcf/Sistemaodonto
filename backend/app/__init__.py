@@ -103,5 +103,8 @@ def create_app():
         if request.path.startswith('/api') or request.path.startswith('/auth'):
             return jsonify({'error': 'Not found'}), 404
         return app.send_static_file('index.html')
+    
+    from .routes.marketing_routes import marketing_bp
+    app.register_blueprint(marketing_bp, url_prefix='/api')
 
     return app

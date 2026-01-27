@@ -15,6 +15,8 @@ class Clinic(db.Model):
     users = db.relationship('User', backref='clinic', lazy=True)
     patients = db.relationship('Patient', backref='clinic', lazy=True)
     inventory_items = db.relationship('InventoryItem', backref='clinic', lazy=True)
+    # NOVO: Relacionamento com Leads
+    leads = db.relationship('Lead', backref='clinic', lazy=True)
 
 # 2. OS USUÁRIOS (DENTISTAS/SECRETÁRIAS)
 class User(db.Model):
@@ -58,3 +60,27 @@ class InventoryItem(db.Model):
     
     # VÍNCULO SAAS
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
+
+# 5. MARKETING / LEADS (CRM)
+class Lead(db.Model):
+    __tablename__ = 'leads'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    phone = db.Column(db.String(20))
+    source = db.Column(db.String(50)) # Ex: 'Instagram', 'Google'
+    status = db.Column(db.String(50), default='new') # 'new', 'contacted', 'scheduled', 'treating'
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'phone': self.phone,
+            'source': self.source,
+            'status': self.status,
+            'notes': self.notes,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
