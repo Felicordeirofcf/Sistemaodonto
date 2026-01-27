@@ -22,7 +22,7 @@ export function Pacientes() {
 
   const carregarPacientes = () => {
     const token = getToken();
-    fetch('http://127.0.0.1:5000/api/patients', {
+    fetch('/api/patients', {
         headers: { 'Authorization': `Bearer ${token}` } // TOKEN AQUI
     })
       .then(res => {
@@ -44,7 +44,7 @@ export function Pacientes() {
     e.preventDefault();
     const token = getToken();
     
-    const response = await fetch('http://127.0.0.1:5000/api/patients', {
+    const response = await fetch('/api/patients', {
       method: 'POST',
       headers: { 
           'Content-Type': 'application/json',

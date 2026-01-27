@@ -23,7 +23,7 @@ export function Estoque() {
 
   // 1. CARREGAR DADOS
   const carregarEstoque = () => {
-    fetch('http://127.0.0.1:5000/api/stock')
+    fetch('/api/stock')
       .then(res => res.json())
       .then(data => {
         setItens(data);
@@ -56,7 +56,7 @@ export function Estoque() {
   // 3. SALVAR NOVO ITEM
   const handleSalvar = async (e: React.FormEvent) => {
     e.preventDefault();
-    const response = await fetch('http://127.0.0.1:5000/api/stock', {
+    const response = await fetch('/api/stock', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(novoItem)

@@ -30,7 +30,7 @@ export function Dashboard() {
     }
 
     // 3. Busca estatísticas com tratamento de erro robusto
-    fetch('http://127.0.0.1:5000/api/dashboard/stats', {
+    fetch('/api/dashboard/stats', {
         headers: {
             'Authorization': `Bearer ${token}`
         }
