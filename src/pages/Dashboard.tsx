@@ -127,7 +127,7 @@ export function Dashboard() {
                 <YAxis axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} tickFormatter={(value) => `R$${value/1000}k`} />
                 <Tooltip 
                   contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}}
-                  formatter={(value: number) => [`R$ ${value}`, 'Receita']}
+                  formatter={(value: any) => [`R$ ${value}`, 'Receita']}
                 />
                 <Area type="monotone" dataKey="valor" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorValor)" />
               </AreaChart>

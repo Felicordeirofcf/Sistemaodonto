@@ -1,10 +1,9 @@
 // @ts-nocheck
 import { useState, useEffect } from 'react';
 import { GeometricTooth } from '../components/GeometricTooth'; 
-import { Save, User, Eraser, AlertCircle, CheckCircle, Activity, Info, Box, Layout, Skull } from 'lucide-react';
+import { Save, User, Eraser, Search } from 'lucide-react';
 import { Skull3D } from '../components/Skull3D';
 
-// --- TIPOS ---
 export type ToothFace = 'vestibular' | 'lingual' | 'distal' | 'mesial' | 'oclusal' | 'occlusal';
 export type TreatmentType = 'caries' | 'restoration' | 'canal' | 'extraction' | 'implant' | null;
 
@@ -18,221 +17,195 @@ interface ToolButtonProps {
   color: string;
   icon: any;
 }
-// -------------
 
 export function Odontograma() {
   const [mouth, setMouth] = useState<Record<number, ToothState>>({});
   const [selectedTool, setSelectedTool] = useState<TreatmentType>(null);
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
   
-  // Estado para o Paciente Atual
-  const [pacienteInfo, setPacienteInfo] = useState({ id: 0, nome: 'Selecione um Paciente' });
+  // SELEÇÃO DE PACIENTE
+  const [listaPacientes, setListaPacientes] = useState<any[]>([]);
+  const [pacienteId, setPacienteId] = useState<string>("");
   const [loading, setLoading] = useState(false);
 
   const upperArcade = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
   const lowerArcade = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
 
-  // Helper para token
-  const getToken = () => localStorage.getItem('odonto_token');
-
-  // 1. CARREGAR DADOS DO PACIENTE AO ABRIR (Tenta pegar o primeiro paciente do banco)
+  // 1. Carregar Pacientes ao abrir
   useEffect(() => {
-    const token = getToken();
-    
-    // Primeiro, busca a lista de pacientes para pegar o primeiro ID real
     fetch('/api/patients', {
-        headers: { 'Authorization': `Bearer ${token}` }
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('odonto_token')}` }
     })
-      .then(res => res.json())
-      .then(pacientes => {
-        if (Array.isArray(pacientes) && pacientes.length > 0) {
-            const primeiroPaciente = pacientes[0];
-            setPacienteInfo({ id: primeiroPaciente.id, nome: primeiroPaciente.nome });
-            
-            // Agora carrega o odontograma desse paciente
-            if (primeiroPaciente.odontogram_data) {
-                setMouth(primeiroPaciente.odontogram_data);
-            }
-        } else {
-            console.log("Nenhum paciente encontrado. Crie um na aba Pacientes.");
-            setPacienteInfo({ id: 0, nome: 'Cadastre um Paciente' });
-        }
-      })
-      .catch(err => console.error("Erro ao carregar paciente:", err));
+    .then(res => res.json())
+    .then(data => {
+      if (Array.isArray(data)) setListaPacientes(data);
+    })
+    .catch(console.error);
   }, []);
 
-  // 2. SALVAR NO BANCO
-  const handleSalvarBanco = async () => {
-    if (pacienteInfo.id === 0) {
-        alert("Cadastre um paciente primeiro na aba 'Pacientes'.");
-        return;
-    }
-
-    setLoading(true);
-    const token = getToken();
-
-    try {
-        const response = await fetch(`/api/patients/${pacienteInfo.id}/odontogram`, {
-            method: 'PUT',
-            headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}` // <--- Token Adicionado aqui
-            },
-            body: JSON.stringify(mouth)
-        });
-        
-        if (response.ok) {
-            alert("Prontuário salvo com sucesso!");
-        } else {
-            alert("Erro ao salvar.");
-        }
-    } catch (error) {
-        console.error(error);
-        alert("Erro de conexão.");
-    } finally {
-        setLoading(false);
+  // 2. Carregar Odontograma quando escolhe o paciente
+  const handleSelectPatient = (id: string) => {
+    setPacienteId(id);
+    const paciente = listaPacientes.find(p => p.id === parseInt(id));
+    if (paciente && paciente.odontogram_data) {
+      setMouth(paciente.odontogram_data);
+    } else {
+      setMouth({}); // Limpa se não tiver nada salvo
     }
   };
 
-  const handleToothClick = (id: number, face: any) => { 
-    if (selectedTool === undefined) return;
+  // 3. Salvar
+  const handleSave = async () => {
+    if (!pacienteId) return alert("Selecione um paciente primeiro!");
+    
+    setLoading(true);
+    try {
+      await fetch(`/api/patients/${pacienteId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('odonto_token')}`
+        },
+        body: JSON.stringify({ odontogram_data: mouth })
+      });
+      alert("Odontograma salvo com sucesso!");
+    } catch (error) {
+      alert("Erro ao salvar.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleToothClick = (toothId: number, face: ToothFace) => {
+    if (!selectedTool && selectedTool !== null) return;
 
     setMouth(prev => {
-      const toothData = prev[id] || {};
+      const toothState = prev[toothId] || {};
       
+      // Se a ferramenta for borracha (null), remove o estado
       if (selectedTool === null) {
-        const newData = { ...toothData };
-        delete newData[face as string];
-        return { ...prev, [id]: newData };
-      }
-      
-      if (selectedTool === 'extraction') {
-        return { 
-          ...prev, 
-          [id]: { vestibular: 'extraction', lingual: 'extraction', mesial: 'extraction', distal: 'extraction', occlusal: 'extraction' } 
-        };
+        const newState = { ...toothState };
+        delete newState[face];
+        return { ...prev, [toothId]: newState };
       }
 
-      return { ...prev, [id]: { ...toothData, [face]: selectedTool } };
+      // Aplica o tratamento
+      return {
+        ...prev,
+        [toothId]: { ...toothState, [face]: selectedTool }
+      };
     });
   };
 
-  const ToolButton = ({ type, label, color, icon: Icon }: ToolButtonProps) => (
-    <button 
-      onClick={() => setSelectedTool(type)} 
-      className={`w-full p-3 rounded-xl flex items-center gap-3 border transition-all duration-200 ${
-        selectedTool === type 
-          ? 'bg-gray-900 text-white border-gray-900 shadow-lg scale-[1.02]' 
-          : 'bg-white border-gray-100 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
-      }`}
-    >
-      <div className="w-6 h-6 rounded-lg flex items-center justify-center shadow-sm" style={{ backgroundColor: color }}>
-         {Icon && <Icon size={14} className="text-white" />}
-      </div>
-      <span className="text-xs font-semibold">{label}</span>
-    </button>
-  );
+  const tools: ToolButtonProps[] = [
+    { type: 'caries', label: 'Cárie', color: 'bg-red-500', icon: AlertCircle },
+    { type: 'restoration', label: 'Restauração', color: 'bg-blue-500', icon: Box },
+    { type: 'canal', label: 'Canal', color: 'bg-purple-500', icon: Activity },
+    { type: 'extraction', label: 'Extração', color: 'bg-gray-800', icon: Eraser },
+    { type: 'implant', label: 'Implante', color: 'bg-green-500', icon: Screw },
+  ];
+
+  function AlertCircle(props: any) { return <div className="w-4 h-4 rounded-full border-2 border-white" /> }
+  function Box(props: any) { return <div className="w-4 h-4 bg-white" /> }
+  function Activity(props: any) { return <div className="w-4 h-4 border-b-2 border-white" /> }
+  function Screw(props: any) { return <div className="w-2 h-4 bg-white mx-auto" /> }
 
   return (
-    <div className="flex flex-col lg:flex-row h-screen bg-[#F8FAFC] overflow-hidden font-sans">
-      
-      <div className="flex-1 p-6 overflow-y-auto flex flex-col items-center">
-        <header className="w-full flex justify-between items-center mb-8 max-w-6xl">
-          <div>
-             <h1 className="text-2xl font-extrabold text-gray-900 tracking-tight">Odontograma Digital</h1>
-             <div className="flex items-center gap-3 mt-1">
-                <span className="flex items-center gap-1.5 text-gray-500 text-xs bg-white px-2 py-1 rounded-md border border-gray-100 shadow-sm">
-                  <User size={12} className="text-blue-500"/> {pacienteInfo.nome}
-                </span>
-                
-                <div className="flex bg-gray-100 p-1 rounded-lg ml-4">
-                  <button onClick={() => setViewMode('2d')} className={`px-3 py-1 rounded-md text-[10px] font-bold flex items-center gap-2 transition-all ${viewMode === '2d' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-400'}`}>
-                    <Layout size={12}/> 2D
-                  </button>
-                  <button onClick={() => setViewMode('3d')} className={`px-3 py-1 rounded-md text-[10px] font-bold flex items-center gap-2 transition-all ${viewMode === '3d' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-400'}`}>
-                    <Box size={12}/> 3D
-                  </button>
-                </div>
-             </div>
-          </div>
-          <button 
-            onClick={handleSalvarBanco}
-            disabled={loading}
-            className="bg-blue-600 text-white px-6 py-2.5 rounded-xl flex items-center gap-2 hover:bg-blue-700 transition-all shadow-md hover:shadow-lg active:scale-95 text-xs font-bold disabled:opacity-50"
-          >
-            <Save size={16} /> {loading ? 'Salvando...' : 'Salvar Prontuário'}
-          </button>
-        </header>
+    <div className="p-8 h-full flex flex-col">
+      {/* BARRA SUPERIOR DE CONTROLE */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6 flex justify-between items-center">
+        
+        {/* SELETOR DE PACIENTE */}
+        <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 bg-gray-50">
+                <User size={20} className="text-gray-400" />
+                <select 
+                    className="bg-transparent outline-none text-gray-700 min-w-[200px]"
+                    value={pacienteId}
+                    onChange={(e) => handleSelectPatient(e.target.value)}
+                >
+                    <option value="">Selecione um Paciente...</option>
+                    {listaPacientes.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                </select>
+            </div>
+        </div>
 
-        <div className="bg-white p-10 rounded-3xl shadow-xl shadow-blue-900/5 border border-gray-100 w-full max-w-6xl flex flex-col items-center relative overflow-hidden min-h-[600px]">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500"></div>
-            
-            <div className="mb-10 flex flex-col items-center">
-              <div className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest mb-4 flex items-center gap-2 ${
-                selectedTool ? 'bg-blue-50 text-blue-600 border border-blue-100' : 'bg-gray-50 text-gray-400 border border-gray-100'
-              }`}>
-                  {selectedTool ? (
-                    <><Activity size={10}/> Modo de Edição: {selectedTool.toUpperCase()}</>
-                  ) : (
-                    <><Info size={10}/> Selecione uma ferramenta ao lado</>
-                  )}
-              </div>
+        <div className="flex gap-2">
+            <div className="flex bg-gray-100 p-1 rounded-lg">
+                <button onClick={() => setViewMode('2d')} className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${viewMode === '2d' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}>2D</button>
+                <button onClick={() => setViewMode('3d')} className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${viewMode === '3d' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}>3D</button>
             </div>
             
-            {viewMode === '2d' ? (
-              <div className="space-y-12 py-4 animate-in fade-in duration-500">
-                <div className="flex flex-col items-center">
-                  <span className="text-[10px] font-bold text-gray-300 uppercase tracking-[0.2em] mb-6">Arcada Superior</span>
-                  <div className="flex gap-2 justify-center flex-wrap">
-                      {upperArcade.map(id => (
-                        <GeometricTooth key={id} id={id} data={mouth[id] || {}} onFaceClick={handleToothClick} />
-                      ))}
-                  </div>
-                </div>
-                <div className="w-full h-px bg-gray-50 relative">
-                  <div className="absolute inset-0 flex items-center justify-center"><div className="w-2 h-2 rounded-full bg-gray-200"></div></div>
-                </div>
-                <div className="flex flex-col items-center">
-                  <div className="flex gap-2 justify-center flex-wrap mb-6">
-                      {lowerArcade.map(id => (
-                        <GeometricTooth key={id} id={id} data={mouth[id] || {}} onFaceClick={handleToothClick} />
-                      ))}
-                  </div>
-                  <span className="text-[10px] font-bold text-gray-300 uppercase tracking-[0.2em]">Arcada Inferior</span>
-                </div>
-              </div>
-            ) : (
-              <div className="w-full h-full animate-in zoom-in-95 duration-500 p-4">
-                 {/* @ts-ignore */}
-                 <Skull3D mouthData={mouth} onToothSelect={(id: number) => handleToothClick(id, 'oclusal')} />
-                 <p className="text-center text-[10px] text-gray-400 mt-4">
-                   * No modo 3D, clique nos dentes para aplicar o tratamento.
-                 </p>
-              </div>
-            )}
+            <button 
+                onClick={handleSave}
+                disabled={loading || !pacienteId}
+                className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+                <Save size={18} /> {loading ? 'Salvando...' : 'Salvar'}
+            </button>
         </div>
-        
-        <footer className="mt-8 text-gray-400 text-[10px] flex gap-6 flex-wrap justify-center">
-           <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-red-500"></div> Cárie</div>
-        </footer>
       </div>
 
-      <aside className="w-full lg:w-80 bg-white border-l border-gray-100 p-6 shadow-2xl z-20 overflow-y-auto">
-        <div className="space-y-3">
-            <ToolButton type="caries" label="Cárie / Lesão" color="#ef4444" icon={AlertCircle} />
-            <ToolButton type="restoration" label="Restauração" color="#3b82f6" icon={CheckCircle} />
-            <ToolButton type="canal" label="Endodontia (Canal)" color="#22c55e" icon={Activity} />
-            <ToolButton type="implant" label="Implante Dentário" color="#a855f7" icon={Activity} />
-            <ToolButton type="extraction" label="Extração / Ausente" color="#1f2937" icon={Skull} />
-            
-            <div className="pt-6 mt-6 border-t border-gray-50">
-              <button onClick={() => setSelectedTool(null)} className={`w-full p-3 rounded-xl flex items-center gap-3 border transition-all duration-200 ${selectedTool === null ? 'bg-gray-100 text-gray-900 border-gray-200 shadow-inner' : 'bg-white border-gray-100 text-gray-500 hover:bg-gray-50'}`}>
-                  <div className="w-6 h-6 bg-white border border-gray-200 rounded-lg flex items-center justify-center"><Eraser size={14} className="text-gray-400" /></div>
-                  <span className="text-xs font-semibold">Borracha / Limpar</span>
-              </button>
-            </div>
+      <div className="flex gap-6 flex-1 h-full overflow-hidden">
+        {/* BARRA DE FERRAMENTAS */}
+        <div className="w-64 bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-3 h-fit">
+          <h3 className="font-bold text-gray-700 mb-2">Ferramentas</h3>
+          {tools.map((tool) => (
+            <button
+              key={tool.type || 'eraser'}
+              onClick={() => setSelectedTool(tool.type)}
+              className={`flex items-center gap-3 p-3 rounded-lg transition-all border ${selectedTool === tool.type ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-transparent hover:bg-gray-50 text-gray-600'}`}
+            >
+              <div className={`w-8 h-8 rounded-lg ${tool.color} flex items-center justify-center text-white shadow-sm`}>
+                <tool.icon size={16} />
+              </div>
+              <span className="font-medium">{tool.label}</span>
+            </button>
+          ))}
+          <button
+              onClick={() => setSelectedTool(null)}
+              className={`flex items-center gap-3 p-3 rounded-lg transition-all border ${selectedTool === null ? 'border-red-500 bg-red-50 text-red-700' : 'border-transparent hover:bg-gray-50 text-gray-600'}`}
+            >
+              <div className="w-8 h-8 rounded-lg bg-white border-2 border-gray-300 flex items-center justify-center text-gray-500">
+                <Eraser size={16} />
+              </div>
+              <span className="font-medium">Borracha</span>
+            </button>
         </div>
-      </aside>
+
+        {/* ÁREA DO ODONTOGRAMA */}
+        <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-100 relative overflow-y-auto p-8 flex justify-center">
+            {!pacienteId && (
+                <div className="absolute inset-0 bg-white/80 z-10 flex flex-col items-center justify-center text-gray-400">
+                    <User size={64} className="mb-4 opacity-20" />
+                    <p className="text-xl font-medium">Selecione um paciente acima para começar</p>
+                </div>
+            )}
+
+            {viewMode === '2d' ? (
+                <div className="max-w-3xl w-full flex flex-col gap-12 py-10">
+                    {/* Arcada Superior */}
+                    <div className="flex justify-center gap-2 flex-wrap">
+                        {upperArcade.map(id => (
+                            <GeometricTooth key={id} id={id} state={mouth[id]} onClick={handleToothClick} />
+                        ))}
+                    </div>
+                    {/* Arcada Inferior */}
+                    <div className="flex justify-center gap-2 flex-wrap">
+                        {lowerArcade.map(id => (
+                            <GeometricTooth key={id} id={id} state={mouth[id]} onClick={handleToothClick} />
+                        ))}
+                    </div>
+                </div>
+            ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                    <Skull3D />
+                </div>
+            )}
+        </div>
+      </div>
     </div>
   );
 }
