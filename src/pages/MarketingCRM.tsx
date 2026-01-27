@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
+// CORREÇÃO AQUI: Adicionado 'type' antes de DropResult
+import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { MoreHorizontal, Plus, Search, Bell, Filter, Megaphone, Calendar, Phone } from 'lucide-react';
 
 // --- DEFINIÇÃO DE TIPOS ---
@@ -27,8 +28,7 @@ export function MarketingCRM() {
   // 1. CARREGAR LEADS DO BANCO
   useEffect(() => {
     const token = localStorage.getItem('odonto_token');
-    // Você precisará criar essa rota GET /api/marketing/leads no backend depois
-    // Por enquanto, vou simular dados se a API falhar para você ver o visual
+    
     fetch('/api/marketing/leads', {
         headers: { 'Authorization': `Bearer ${token}` }
     })

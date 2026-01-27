@@ -11,20 +11,17 @@ migrate = Migrate()
 jwt = JWTManager()
 
 def create_app():
-    # Configura o Flask para servir arquivos estáticos da pasta 'static' (onde o React build fica)
+    # Configura o Flask para servir arquivos estáticos da pasta 'static'
     app = Flask(__name__, static_folder='static', static_url_path='')
 
     # --- CONFIGURAÇÃO INTELIGENTE DO BANCO DE DADOS ---
-    # 1. Tenta pegar a URL do banco do ambiente (Render)
     database_url = os.environ.get('DATABASE_URL')
     
-    # 2. Correção para o Render (ele usa 'postgres://' mas o SQLAlchemy exige 'postgresql://')
+    # Correção para o Render (postgres:// -> postgresql://)
     if database_url and database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
 
-    # 3. Se tiver URL (Nuvem), usa Postgres. Se não (Local), usa SQLite.
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///odonto_saas.db'
-    
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'super-secreta-mudar-em-producao')
 
@@ -34,7 +31,7 @@ def create_app():
     migrate.init_app(app, db)
     jwt.init_app(app)
 
-    # --- HANDLERS DE TOKEN (MENSAGENS DE ERRO JSON) ---
+    # --- HANDLERS DE TOKEN ---
     @jwt.invalid_token_loader
     def invalid_token_callback(error):
         return jsonify({'message': 'Token inválido.', 'error': 'invalid_token'}), 422
@@ -47,8 +44,8 @@ def create_app():
     def expired_token_callback(jwt_header, jwt_payload):
         return jsonify({'message': 'Token expirado.', 'error': 'token_expired'}), 401
 
-    # Importa os Modelos (dentro da função para evitar ciclo de importação)
-    from .models import Clinic, User, Patient, InventoryItem
+    # Importa os Modelos
+    from .models import Clinic, User, Patient, InventoryItem, Lead
 
     # --- REGISTRO DE ROTAS (BLUEPRINTS) ---
     from .routes.auth_routes import auth_bp
@@ -66,45 +63,32 @@ def create_app():
     from .routes.atende_chat_routes import atende_chat_bp
     app.register_blueprint(atende_chat_bp, url_prefix='/api')
 
+    from .routes.marketing_routes import marketing_bp
+    app.register_blueprint(marketing_bp, url_prefix='/api')
+
     # --- ROTEAMENTO SPA (FRONTEND REACT) ---
-    # 1. Rota Raiz: Entrega o index.html do React
+    
+    # CORREÇÃO AQUI: Mudamos o nome da função de 'serve' para 'index'
+    # Isso evita o conflito "overwriting existing endpoint"
     @app.route('/')
-    def serve():
+    def index():
         return app.send_static_file('index.html')
 
-    # 2. Tratamento de Erro 404:
-    # Se o navegador pedir uma rota que o Flask não conhece (ex: /agenda), 
-    # entregamos o index.html para o React Router assumir.
-    # Se for uma API (/api/...), retornamos erro 404 JSON real.
-    @app.errorhandler(404)
-    def not_found(e):
-        if request.path.startswith('/api') or request.path.startswith('/auth'):
-            return jsonify({'error': 'Not found'}), 404
-        return app.send_static_file('index.html')
-    # --- ROTEAMENTO SPA (FRONTEND REACT) ---
-    @app.route('/')
-    def serve():
-        return app.send_static_file('index.html')
-
-    # ===> ADICIONE ESTE BLOCO AQUI (ROTA DE EMERGÊNCIA) <===
+    # Rota de Emergência para criar tabelas no banco
     @app.route('/api/setup_db')
     def setup_db():
         try:
             with app.app_context():
-                # Força a criação de todas as tabelas que estão nos Models mas não no Banco
                 db.create_all()
                 return jsonify({'message': 'Banco de dados atualizado e tabelas criadas com sucesso!'})
         except Exception as e:
             return jsonify({'error': str(e)}), 500
-    # ========================================================
 
+    # Tratamento de Erro 404
     @app.errorhandler(404)
     def not_found(e):
         if request.path.startswith('/api') or request.path.startswith('/auth'):
             return jsonify({'error': 'Not found'}), 404
         return app.send_static_file('index.html')
-    
-    from .routes.marketing_routes import marketing_bp
-    app.register_blueprint(marketing_bp, url_prefix='/api')
 
     return app
