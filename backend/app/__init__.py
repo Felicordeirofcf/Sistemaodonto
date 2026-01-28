@@ -11,7 +11,7 @@ migrate = Migrate()
 jwt = JWTManager()
 
 def create_app():
-    # Configura o Flask para servir arquivos estáticos da pasta 'static'
+    # Configura o Flask para servir arquivos estáticos (Frontend Build)
     app = Flask(__name__, static_folder='static', static_url_path='')
 
     # --- CONFIGURAÇÃO DO BANCO DE DADOS ---
@@ -31,6 +31,9 @@ def create_app():
     migrate.init_app(app, db)
     jwt.init_app(app)
 
+    # Importa os Modelos ANTES dos Blueprints para evitar problemas de dependência circular
+    from .models import Clinic, User, Patient, InventoryItem, Lead, Appointment, Transaction, Procedure
+
     # --- HANDLERS DE TOKEN JWT ---
     @jwt.invalid_token_loader
     def invalid_token_callback(error):
@@ -44,13 +47,12 @@ def create_app():
     def expired_token_callback(jwt_header, jwt_payload):
         return jsonify({'message': 'Token expirado.', 'error': 'token_expired'}), 401
 
-    # Importa os Modelos para que o db.create_all() os reconheça
-    from .models import Clinic, User, Patient, InventoryItem, Lead, Appointment, Transaction, Procedure
-
     # --- REGISTRO DE BLUEPRINTS ---
+    # 1. Autenticação (Login, Status)
     from .routes.auth_routes import auth_bp
     app.register_blueprint(auth_bp, url_prefix='/auth')
     
+    # 2. API Principal (Pacientes, Estoque, Dashboard, etc)
     from .routes.patient_routes import patient_bp
     app.register_blueprint(patient_bp, url_prefix='/api')
     
@@ -72,14 +74,13 @@ def create_app():
     from .routes.financial_routes import financial_bp
     app.register_blueprint(financial_bp, url_prefix='/api')
 
-    # --- NOVOS REGISTROS PARA RESOLVER ERROS 404 E 405 ---
     from .routes.team_routes import team_bp
-    app.register_blueprint(team_bp, url_prefix='/api') # Resolve o 404 de Gestão de Equipe
+    app.register_blueprint(team_bp, url_prefix='/api') 
 
     from .routes.procedure_routes import procedure_bp
-    app.register_blueprint(procedure_bp, url_prefix='/api') # Resolve o 405 de Procedimentos
+    app.register_blueprint(procedure_bp, url_prefix='/api')
 
-    # --- ROTAS DE UTILIDADE & BANCO ---
+    # --- ROTAS DE UTILIDADE & NAVEGAÇÃO ---
 
     @app.route('/')
     def index():
@@ -87,16 +88,16 @@ def create_app():
 
     @app.route('/api/setup_db')
     def setup_db():
-        """Cria tabelas faltantes sem apagar dados existentes."""
+        """Cria tabelas faltantes e garante a nova coluna max_dentists"""
         try:
             db.create_all()
-            return jsonify({'message': 'Tabelas verificadas/criadas com sucesso!'}), 200
+            return jsonify({'message': 'Banco de dados sincronizado com sucesso!'}), 200
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
     @app.route('/api/danger_reset_db')
     def danger_reset_db():
-        """APAGA TUDO e recria o banco."""
+        """APAGA TUDO e recria o banco (Cuidado!)"""
         confirm = request.args.get('confirm')
         if confirm != 'true':
             return jsonify({'error': 'Adicione ?confirm=true para resetar o banco'}), 403
@@ -108,6 +109,7 @@ def create_app():
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
+    # Fallback para o React (SPA)
     @app.errorhandler(404)
     def not_found(e):
         if request.path.startswith('/api') or request.path.startswith('/auth'):
