@@ -31,7 +31,7 @@ def create_app():
     migrate.init_app(app, db)
     jwt.init_app(app)
 
-    # Importa os Modelos ANTES dos Blueprints para evitar problemas de dependência circular
+    # Importa os Modelos ANTES dos Blueprints
     from .models import Clinic, User, Patient, InventoryItem, Lead, Appointment, Transaction, Procedure
 
     # --- HANDLERS DE TOKEN JWT ---
@@ -48,11 +48,9 @@ def create_app():
         return jsonify({'message': 'Token expirado.', 'error': 'token_expired'}), 401
 
     # --- REGISTRO DE BLUEPRINTS ---
-    # 1. Autenticação (Login, Status)
     from .routes.auth_routes import auth_bp
     app.register_blueprint(auth_bp, url_prefix='/auth')
     
-    # 2. API Principal (Pacientes, Estoque, Dashboard, Equipe, etc)
     from .routes.patient_routes import patient_bp
     app.register_blueprint(patient_bp, url_prefix='/api')
     
@@ -75,12 +73,12 @@ def create_app():
     app.register_blueprint(financial_bp, url_prefix='/api')
 
     from .routes.team_routes import team_bp
-    app.register_blueprint(team_bp, url_prefix='/api') # Rota de Gestão de Equipe
+    app.register_blueprint(team_bp, url_prefix='/api') 
 
     from .routes.procedure_routes import procedure_bp
-    app.register_blueprint(procedure_bp, url_prefix='/api') # Rota de Fichas Técnicas
+    app.register_blueprint(procedure_bp, url_prefix='/api')
 
-    # --- ROTAS DE UTILIDADE & NAVEGAÇÃO ---
+    # --- ROTAS DE UTILIDADE (REVISADAS) ---
 
     @app.route('/')
     def index():
@@ -88,30 +86,32 @@ def create_app():
 
     @app.route('/api/setup_db')
     def setup_db():
-        """Cria tabelas faltantes e garante a nova coluna max_dentists"""
+        """Sincroniza tabelas sem apagar dados"""
         try:
             db.create_all()
-            return jsonify({'message': 'Banco de dados sincronizado com sucesso!'}), 200
+            return jsonify({'message': 'Tabelas verificadas com sucesso!'}), 200
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/api/danger_reset_db')
-    def danger_reset_db():
-        """APAGA TUDO e recria o banco (Cuidado!)"""
+    @app.route('/api/force_reset_db')
+    def force_reset():
+        """ROTA BLINDADA: Apaga tudo e recria com as novas colunas"""
         confirm = request.args.get('confirm')
         if confirm != 'true':
-            return jsonify({'error': 'Adicione ?confirm=true para resetar o banco'}), 403
+            return "Erro: Adicione ?confirm=true", 403
             
         try:
+            db.session.remove() # Força limpeza de sessões ativas
             db.drop_all()
             db.create_all()
-            return jsonify({'message': 'BANCO RESETADO TOTALMENTE. Todas as colunas novas foram criadas.'}), 200
+            return "✅ BANCO RESETADO COM SUCESSO! Novas colunas (is_active, etc) criadas.", 200
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            return f"❌ Erro ao resetar: {str(e)}", 500
 
     # Fallback para o React (SPA)
     @app.errorhandler(404)
     def not_found(e):
+        # Garante que erros de API retornem JSON em vez de HTML
         if request.path.startswith('/api') or request.path.startswith('/auth'):
             return jsonify({'error': 'Rota de API não encontrada'}), 404
         return app.send_static_file('index.html')
