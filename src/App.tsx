@@ -1,27 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
-import { MarketingCRM } from './pages/MarketingCRM';
-import { Dashboard } from './pages/Dashboard';
-import { AtendeChat } from './pages/AtendeChat';
-import { Odontograma } from './pages/Odontograma';
-import { Financeiro } from './pages/Financeiro';
-import { Agenda } from './pages/Agenda';
-import { Harmonizacao } from './pages/Harmonizacao';
-import { Estoque } from './pages/Estoque';
-import { Pacientes } from './pages/Pacientes';
+import { Loader2, ShieldAlert } from 'lucide-react';
+
+// --- IMPORTAÇÕES DE PÁGINAS (Garanta que todas usam "export function Nome()") ---
 import { Login } from './pages/Login';
-
-// IMPORTAÇÕES PROFISSIONAIS
-import { LandingPage } from './pages/LandingPage';
-import { DashboardVendas } from './pages/DashboardVendas'; 
+import { Dashboard } from './pages/Dashboard';
+import { DashboardVendas } from './pages/DashboardVendas';
+import { Pacientes } from './pages/Pacientes';
+import { Agenda } from './pages/Agenda';
+import { Odontograma } from './pages/Odontograma';
+import { Harmonizacao } from './pages/Harmonizacao';
+import { Financeiro } from './pages/Financeiro';
+import { Estoque } from './pages/Estoque';
 import { ConfigProcedimentos } from './pages/ConfigProcedimentos';
-import { MarketingCampaigns } from './pages/MarketingCampaigns';
 import { GestaoEquipe } from './pages/GestaoEquipe';
+import { AtendeChat } from './pages/AtendeChat';
 import { Configuracoes } from './pages/Configuracoes';
-import { Loader2, ShieldAlert } from 'lucide-react'; 
+import { LandingPage } from './pages/LandingPage';
 
-// COMPONENTE DE BLOQUEIO (UI INDUSTRIAL)
+// Importação do Marketing (Atenção: MarketingCRM deve ter "export function MarketingCRM")
+import { MarketingCRM } from './pages/MarketingCRM'; 
+import { MarketingCampaigns } from './pages/MarketingCampaigns'; // Se este arquivo não existir, remova esta linha
+
+// --- COMPONENTE DE BLOQUEIO (UI INDUSTRIAL) ---
 const BloqueioPagamento = () => (
   <div className="fixed inset-0 bg-slate-900/95 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm">
     <div className="bg-white p-10 rounded-[3rem] max-w-md text-center shadow-2xl border border-red-50 animate-in zoom-in duration-300">
@@ -37,7 +39,7 @@ const BloqueioPagamento = () => (
   </div>
 );
 
-// ROTA PRIVADA COM VERIFICAÇÃO DE STATUS
+// --- ROTA PRIVADA COM VERIFICAÇÃO DE STATUS ---
 const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
   const token = localStorage.getItem('odonto_token');
   const [isActive, setIsActive] = useState<boolean | null>(null);
@@ -55,7 +57,7 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
       .then(data => setIsActive(data.is_active))
       .catch((err) => {
         console.error("Erro no Status:", err);
-        // Se o banco estiver resetando, mantemos como ativo para evitar bloqueios falsos
+        // Fallback para evitar bloqueio indevido durante resets
         setIsActive(true); 
       })
       .finally(() => setChecking(false));
@@ -76,6 +78,7 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
+// --- APLICAÇÃO PRINCIPAL ---
 function App() {
   return (
     <BrowserRouter>
@@ -84,7 +87,7 @@ function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
 
-        {/* EXCEÇÃO PARA APIS: Evita que o React capture o redirecionamento do Flask */}
+        {/* EXCEÇÃO PARA APIS: Evita que o React capture rotas do Flask */}
         <Route path="/api/*" element={null} />
         <Route path="/auth/*" element={null} />
         
@@ -105,9 +108,11 @@ function App() {
                   <Route path="/estoque" element={<Estoque />} />
                   <Route path="/fichas-tecnicas" element={<ConfigProcedimentos />} />
                   <Route path="/gestao-equipe" element={<GestaoEquipe />} />
+                  
+                  {/* ROTA PRINCIPAL DO NOVO MARKETING */}
                   <Route path="/marketing" element={<MarketingCRM />} />
                   
-                  {/* NOVA ROTA: Marketing Automático / Ads */}
+                  {/* Sub-rota para campanhas (Opcional, se o arquivo existir) */}
                   <Route path="/marketing/automacao" element={<MarketingCampaigns />} />
                   
                   <Route path="/atende-chat" element={<AtendeChat />} />
