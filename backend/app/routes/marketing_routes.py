@@ -131,20 +131,18 @@ def sync_meta_real():
             clicks = int(stats.get('clicks', 0))
             cpc = float(stats.get('cpc', 0.0))
             
-            # Só atualiza se trouxe sucesso
             clinic.current_ad_balance = spend
             db.session.commit()
             
             return jsonify({'message': 'Sync OK', 'spend': spend, 'clicks': clicks, 'cpc': cpc}), 200
         
-        # Se não tiver dados (conta nova), retorna zero mas é um zero "válido"
         return jsonify({'message': 'Sync OK (Sem dados)', 'spend': 0.0, 'clicks': 0, 'cpc': 0.0}), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
-# --- 3. INSTAGRAM & IA ---
+# --- 3. MÍDIAS SOCIAIS (INSTAGRAM & FACEBOOK) & IA ---
 
 @marketing_bp.route('/marketing/instagram/media', methods=['GET'])
 @jwt_required()
@@ -154,7 +152,7 @@ def get_instagram_media():
         clinic = Clinic.query.get(user.clinic_id)
 
         if not clinic.meta_access_token:
-            return jsonify({'error': 'Instagram não conectado.'}), 400
+            return jsonify({'error': 'Conta não conectada.'}), 400
 
         # Busca Página -> Instagram Vinculado
         url_pages = "https://graph.facebook.com/v19.0/me/accounts"
@@ -169,14 +167,65 @@ def get_instagram_media():
                 break
         
         if not ig_id:
-            # RETORNA ERRO ESPECÍFICO 404 PARA O FRONT TRATAR
-            return jsonify({'error': 'Nenhuma conta de Instagram Business vinculada à Página do Facebook.'}), 404
+            return jsonify({'error': 'Nenhum Instagram Business vinculado à Página do Facebook.'}), 404
 
         url_media = f"https://graph.facebook.com/v19.0/{ig_id}/media"
-        params_media = {'access_token': clinic.meta_access_token, 'fields': 'id,caption,media_type,media_url,thumbnail_url', 'limit': 12}
+        params_media = {'access_token': clinic.meta_access_token, 'fields': 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp', 'limit': 15}
         resp_media = requests.get(url_media, params_media)
         
         return jsonify(resp_media.json().get('data', [])), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@marketing_bp.route('/marketing/facebook/media', methods=['GET'])
+@jwt_required()
+def get_facebook_media():
+    """
+    NOVA ROTA: Busca posts da Página do Facebook
+    """
+    try:
+        user = User.query.get(get_jwt_identity())
+        clinic = Clinic.query.get(user.clinic_id)
+
+        if not clinic.meta_access_token:
+            return jsonify({'error': 'Conta não conectada.'}), 400
+
+        # Busca a primeira página administrada pelo usuário
+        url_pages = "https://graph.facebook.com/v19.0/me/accounts"
+        params = {'access_token': clinic.meta_access_token, 'fields': 'id,name'}
+        resp = requests.get(url_pages, params=params)
+        data = resp.json().get('data', [])
+
+        if not data:
+            return jsonify({'error': 'Nenhuma página do Facebook encontrada.'}), 404
+            
+        page_id = data[0]['id'] # Pega a primeira página
+
+        # Busca posts da página (feed)
+        url_posts = f"https://graph.facebook.com/v19.0/{page_id}/posts"
+        params_posts = {
+            'access_token': clinic.meta_access_token,
+            'fields': 'id,message,full_picture,created_time,permalink_url',
+            'limit': 15
+        }
+        resp_posts = requests.get(url_posts, params=params_posts)
+        
+        # Formata para ficar igual ao objeto do Instagram no front
+        fb_data = resp_posts.json().get('data', [])
+        formatted_data = []
+        for post in fb_data:
+            if 'full_picture' in post: # Só traz posts que tem imagem
+                formatted_data.append({
+                    'id': post['id'],
+                    'media_url': post['full_picture'],
+                    'thumbnail_url': post['full_picture'],
+                    'caption': post.get('message', ''),
+                    'media_type': 'IMAGE',
+                    'permalink': post.get('permalink_url', '')
+                })
+
+        return jsonify(formatted_data), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -200,7 +249,7 @@ def generate_copy_ai():
 # --- 4. EXTRAS ---
 @marketing_bp.route('/marketing/campaign/recall', methods=['GET'])
 @jwt_required()
-def get_recall(): return jsonify([]), 200 # Simplificado para caber
+def get_recall(): return jsonify([]), 200 
 
 @marketing_bp.route('/marketing/campaign/activate', methods=['POST'])
 @jwt_required()

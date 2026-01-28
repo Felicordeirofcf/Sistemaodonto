@@ -3,7 +3,7 @@ import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-p
 import { 
   MoreHorizontal, Plus, Phone, X, Loader2, 
   Facebook, Target, TrendingUp, DollarSign, RefreshCw, CheckCircle2,
-  Instagram, Wand2, Copy, Image as ImageIcon, AlertTriangle
+  Instagram, Wand2, Copy, Image as ImageIcon, AlertTriangle, Layout
 } from 'lucide-react';
 
 declare global {
@@ -13,11 +13,9 @@ declare global {
   }
 }
 
-// Interfaces
 interface Lead { id: number; name: string; source: string; phone?: string; status: string; notes?: string; }
 interface IgMedia { id: string; media_url: string; thumbnail_url?: string; caption?: string; media_type: string; }
 
-// Colunas Kanban
 const COLUMNS = {
   new: { title: 'Novos Leads', color: 'border-blue-500', headerColor: 'text-blue-600', bg: 'bg-blue-50' },
   contacted: { title: 'Agendamento Tentado', color: 'border-yellow-500', headerColor: 'text-yellow-600', bg: 'bg-yellow-50' },
@@ -27,23 +25,21 @@ const COLUMNS = {
 
 export function MarketingCRM() {
   
-  // --- STATES ---
   const [activeTab, setActiveTab] = useState<'funnel' | 'creative'>('funnel');
+  const [mediaSource, setMediaSource] = useState<'instagram' | 'facebook'>('instagram'); // Novo seletor
   const [leads, setLeads] = useState<Lead[]>([]);
   const [mediaList, setMediaList] = useState<IgMedia[]>([]);
   const [selectedMedia, setSelectedMedia] = useState<IgMedia | null>(null);
   const [aiCaption, setAiCaption] = useState('');
   
-  // Loadings e Erros
   const [isGenerating, setIsGenerating] = useState(false);
   const [mediaLoading, setMediaLoading] = useState(false);
   const [igError, setIgError] = useState<string | null>(null);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [newLead, setNewLead] = useState({ name: '', phone: '', source: 'Instagram', notes: '' });
+  const [newLead, setNewLead] = useState({ name: '', phone: '', source: 'Manual', notes: '' });
   
-  // Facebook Auth & Stats
   const [isConnected, setIsConnected] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true); 
@@ -51,13 +47,10 @@ export function MarketingCRM() {
 
   useEffect(() => {
     const token = localStorage.getItem('odonto_token');
-
-    // Carrega Leads
     fetch('/api/marketing/leads', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(res => res.json()).then(data => { if (Array.isArray(data)) setLeads(data); })
       .catch(console.error).finally(() => setLoading(false));
 
-    // Init Facebook
     window.fbAsyncInit = function() {
         window.FB.init({ appId: '928590639502117', cookie: true, xfbml: true, version: 'v19.0' });
     };
@@ -74,7 +67,6 @@ export function MarketingCRM() {
     checkMetaConnection();
   }, []);
 
-  // --- FUNÇÕES FACEBOOK ---
   const checkMetaConnection = async () => {
     try {
         const token = localStorage.getItem('odonto_token');
@@ -83,12 +75,10 @@ export function MarketingCRM() {
         if (res.ok) {
             const data = await res.json();
             setIsConnected(true);
-            // GARANTIA: Só atualiza se vier dados válidos, senão mantém o anterior (evita zerar por erro)
             if (data.spend !== undefined) {
                 setAdsStats({ spend: data.spend, clicks: data.clicks, cpc: data.cpc });
             }
         } else {
-            // Se der erro 400/401, aí sim desconecta
             if(res.status === 401) setIsConnected(false);
         }
     } catch (e) { console.log("Sem conexão Meta"); }
@@ -98,12 +88,10 @@ export function MarketingCRM() {
   const handleFacebookLogin = () => {
     setAuthLoading(true);
     if (!window.FB) return alert("Erro no SDK Facebook");
-    
-    // PEDE TODAS AS PERMISSÕES DE UMA VEZ
     window.FB.login((response: any) => {
         if (response.authResponse) sendTokenToBackend(response.authResponse.accessToken);
         else setAuthLoading(false);
-    }, { scope: 'ads_management,ads_read,leads_retrieval,instagram_basic,pages_show_list' });
+    }, { scope: 'ads_management,ads_read,leads_retrieval,instagram_basic,pages_show_list,pages_read_engagement' }); // Adicionado escopos
   };
 
   const sendTokenToBackend = async (fbToken: string) => {
@@ -115,22 +103,21 @@ export function MarketingCRM() {
         });
         if (res.ok) { 
             setIsConnected(true); 
-            alert("Facebook e Instagram Conectados!");
+            alert("Redes Sociais Conectadas!");
             checkMetaConnection(); 
         }
     } catch (error) { alert("Erro ao conectar."); } finally { setAuthLoading(false); }
   };
 
-  // --- FUNÇÕES INSTAGRAM & IA ---
-  const fetchInstagramMedia = async () => {
-    // Se já carregou ou não está conectado, não faz nada
-    if (mediaList.length > 0 || !isConnected) return; 
-    
+  const fetchMedia = async (source: 'instagram' | 'facebook') => {
+    if (!isConnected) return;
     setMediaLoading(true);
     setIgError(null);
+    setMediaSource(source);
     
     try {
-        const res = await fetch('/api/marketing/instagram/media', {
+        const endpoint = source === 'instagram' ? '/api/marketing/instagram/media' : '/api/marketing/facebook/media';
+        const res = await fetch(endpoint, {
              headers: { 'Authorization': `Bearer ${localStorage.getItem('odonto_token')}` }
         });
         const data = await res.json();
@@ -138,8 +125,8 @@ export function MarketingCRM() {
         if (res.ok) {
             setMediaList(data);
         } else {
-            // Captura o erro específico (ex: conta não vinculada)
             setIgError(data.error || "Erro ao buscar mídia.");
+            setMediaList([]);
         }
     } catch (e) { 
         setIgError("Falha na conexão."); 
@@ -162,10 +149,22 @@ export function MarketingCRM() {
     finally { setIsGenerating(false); }
   };
 
-  // --- FUNÇÕES KANBAN (Mantidas) ---
-  const handleCreateLead = async (e: React.FormEvent) => { e.preventDefault(); /* Lógica de criar lead... */ setIsModalOpen(false); };
+  const handleCreateLead = async (e: React.FormEvent) => { 
+      e.preventDefault(); 
+      try {
+        const res = await fetch('/api/marketing/leads', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('odonto_token')}` },
+            body: JSON.stringify({ ...newLead, status: 'new' })
+        });
+        const saved = await res.json();
+        setLeads([...leads, saved]);
+        setIsModalOpen(false);
+        setNewLead({ name: '', phone: '', source: 'Manual', notes: '' });
+      } catch(e) { alert("Erro ao criar"); }
+  };
+
   const onDragEnd = async (result: DropResult) => { 
-      // Lógica simplificada para caber
       if (!result.destination) return;
       const newStatus = result.destination.droppableId;
       const leadId = parseInt(result.draggableId);
@@ -186,24 +185,31 @@ export function MarketingCRM() {
           <p className="text-gray-500 font-medium">Automação de Leads e Criativos com IA.</p>
         </div>
         
-        {/* TABS DE NAVEGAÇÃO */}
-        <div className="flex bg-white p-1 rounded-xl border border-gray-200 shadow-sm">
-            <button 
-                onClick={() => setActiveTab('funnel')}
-                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'funnel' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
-            >
-                Funil de Vendas
-            </button>
-            <button 
-                onClick={() => { setActiveTab('creative'); fetchInstagramMedia(); }}
-                className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'creative' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
-            >
-                <Wand2 size={14} /> Criador IA
+        <div className="flex items-center gap-4">
+            {/* TABS DE NAVEGAÇÃO */}
+            <div className="flex bg-white p-1 rounded-xl border border-gray-200 shadow-sm">
+                <button 
+                    onClick={() => setActiveTab('funnel')}
+                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'funnel' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
+                >
+                    Funil de Vendas
+                </button>
+                <button 
+                    onClick={() => { setActiveTab('creative'); fetchMedia('instagram'); }}
+                    className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'creative' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
+                >
+                    <Wand2 size={14} /> Criador IA
+                </button>
+            </div>
+
+            {/* BOTÃO NOVO LEAD MANUAL (MANTIDO!) */}
+            <button onClick={() => setIsModalOpen(true)} className="px-6 py-3 bg-gray-900 text-white rounded-xl font-bold text-sm hover:bg-gray-800 flex items-center gap-2 shadow-xl shadow-gray-200 transition-all active:scale-95">
+                <Plus size={18} /> Novo Lead
             </button>
         </div>
       </header>
 
-      {/* --- WIDGET FACEBOOK (SEMPRE VISÍVEL NO TOPO OU SÓ NA ABA FUNIL? MANTENDO NA FUNIL) --- */}
+      {/* --- ABA: FUNIL DE VENDAS --- */}
       {activeTab === 'funnel' && (
         <>
             <div className="mb-6 flex-shrink-0">
@@ -239,28 +245,36 @@ export function MarketingCRM() {
         </>
       )}
 
-      {/* --- CONTEÚDO DA ABA: CRIADOR IA --- */}
+      {/* --- ABA: CRIADOR IA --- */}
       {activeTab === 'creative' && (
         <div className="flex gap-6 h-full overflow-hidden">
             {/* Galeria */}
             <div className="w-2/3 bg-white rounded-[2rem] p-6 shadow-sm border border-gray-200 overflow-y-auto">
-                <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><Instagram className="text-pink-600"/> Selecione um Post</h3>
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                        {mediaSource === 'instagram' ? <Instagram className="text-pink-600"/> : <Facebook className="text-blue-600"/>} 
+                        Selecione um Post
+                    </h3>
+                    
+                    {/* Botões de Troca de Fonte */}
+                    <div className="flex bg-gray-100 p-1 rounded-lg">
+                        <button onClick={() => fetchMedia('instagram')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${mediaSource === 'instagram' ? 'bg-white shadow text-pink-600' : 'text-gray-500'}`}>Instagram</button>
+                        <button onClick={() => fetchMedia('facebook')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${mediaSource === 'facebook' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}>Facebook</button>
+                    </div>
+                </div>
                 
                 {!isConnected ? (
                     <div className="h-64 flex flex-col items-center justify-center text-gray-400 bg-gray-50 rounded-2xl border-2 border-dashed">
                         <ImageIcon size={48} className="mb-2 opacity-50"/>
-                        <p>Conecte o Facebook na aba "Funil" primeiro.</p>
+                        <p>Conecte as Redes Sociais na aba "Funil" primeiro.</p>
                     </div>
                 ) : mediaLoading ? (
-                    <div className="h-64 flex flex-col items-center justify-center text-gray-400"><Loader2 className="animate-spin mb-2 text-purple-600" size={32}/><p>Buscando fotos no Instagram...</p></div>
+                    <div className="h-64 flex flex-col items-center justify-center text-gray-400"><Loader2 className="animate-spin mb-2 text-purple-600" size={32}/><p>Buscando fotos...</p></div>
                 ) : igError ? (
                     <div className="bg-red-50 p-6 rounded-2xl border border-red-100 flex flex-col items-center text-center">
                         <AlertTriangle className="text-red-500 mb-2" size={32}/>
-                        <h4 className="text-red-800 font-bold mb-1">Instagram Business não encontrado</h4>
+                        <h4 className="text-red-800 font-bold mb-1">Mídia não encontrada</h4>
                         <p className="text-red-600 text-sm mb-4 max-w-md">{igError}</p>
-                        <a href="https://help.instagram.com/570895513091465" target="_blank" className="text-xs bg-white border border-red-200 text-red-600 px-4 py-2 rounded-lg font-bold hover:bg-red-50">
-                            Como vincular Instagram à Página do Facebook?
-                        </a>
                     </div>
                 ) : (
                     <div className="grid grid-cols-3 gap-4">
@@ -316,18 +330,31 @@ export function MarketingCRM() {
         </div>
       )}
       
-      {/* Modais extras mantidos aqui ocultos para não poluir... */}
+      {/* MODAL NOVO LEAD (MANTIDO) */}
       {isModalOpen && (
           <div className="fixed inset-0 z-[100] bg-slate-900/60 flex items-center justify-center backdrop-blur-sm p-4">
-              <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl w-full max-w-md">
+              <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl w-full max-w-md animate-in fade-in zoom-in duration-200 border border-white">
                   <div className="flex justify-between items-center mb-6">
                       <h3 className="text-xl font-black text-gray-800">Novo Potencial Paciente</h3>
                       <button onClick={() => setIsModalOpen(false)}><X size={20} className="text-gray-400" /></button>
                   </div>
                   <form onSubmit={handleCreateLead} className="flex flex-col gap-4">
-                      <input required className="w-full p-3 bg-gray-50 border rounded-xl" placeholder="Nome" value={newLead.name} onChange={e => setNewLead({...newLead, name: e.target.value})} />
-                      <input className="w-full p-3 bg-gray-50 border rounded-xl" placeholder="WhatsApp" value={newLead.phone} onChange={e => setNewLead({...newLead, phone: e.target.value})} />
-                      <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold">Salvar Lead</button>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Nome Completo</label>
+                        <input required className="w-full p-3 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={newLead.name} onChange={e => setNewLead({...newLead, name: e.target.value})} />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase text-gray-400 ml-1">WhatsApp</label>
+                        <input className="w-full p-3 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="55..." value={newLead.phone} onChange={e => setNewLead({...newLead, phone: e.target.value})} />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Origem</label>
+                        <select className="w-full p-3 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={newLead.source} onChange={e => setNewLead({...newLead, source: e.target.value})}>
+                            <option value="Manual">Manual (Balcão/Telefone)</option>
+                            <option value="Indicação">Indicação</option>
+                        </select>
+                      </div>
+                      <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-sm uppercase tracking-widest mt-4 shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all">Salvar Lead</button>
                   </form>
               </div>
           </div>
