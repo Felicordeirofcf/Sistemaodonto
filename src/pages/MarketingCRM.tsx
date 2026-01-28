@@ -3,7 +3,7 @@ import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-p
 import { 
   MoreHorizontal, Plus, Phone, X, Loader2, 
   Facebook, Target, TrendingUp, DollarSign, RefreshCw, CheckCircle2,
-  Instagram, Wand2, Copy, Image as ImageIcon, AlertTriangle, LogOut
+  Instagram, Wand2, Copy, Image as ImageIcon, AlertTriangle, LogOut, FileText
 } from 'lucide-react';
 
 declare global {
@@ -25,13 +25,15 @@ const COLUMNS = {
 
 export function MarketingCRM() {
   
+  // --- STATES ---
   const [activeTab, setActiveTab] = useState<'funnel' | 'creative'>('funnel');
-  const [mediaSource, setMediaSource] = useState<'instagram' | 'facebook'>('instagram');
+  const [mediaSource, setMediaSource] = useState<'instagram' | 'facebook'>('instagram'); // Seletor de Mídia
   const [leads, setLeads] = useState<Lead[]>([]);
   const [mediaList, setMediaList] = useState<IgMedia[]>([]);
   const [selectedMedia, setSelectedMedia] = useState<IgMedia | null>(null);
   const [aiCaption, setAiCaption] = useState('');
   
+  // Loadings e Controle
   const [isGenerating, setIsGenerating] = useState(false);
   const [mediaLoading, setMediaLoading] = useState(false);
   const [igError, setIgError] = useState<string | null>(null);
@@ -40,20 +42,31 @@ export function MarketingCRM() {
   const [loading, setLoading] = useState(true);
   const [newLead, setNewLead] = useState({ name: '', phone: '', source: 'Manual', notes: '' });
   
+  // Facebook Auth
   const [isConnected, setIsConnected] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true); 
   const [adsStats, setAdsStats] = useState({ spend: 0.0, clicks: 0, cpc: 0.0 });
 
+  // --- 1. INICIALIZAÇÃO ---
   useEffect(() => {
     const token = localStorage.getItem('odonto_token');
+    
+    // Busca Leads
     fetch('/api/marketing/leads', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(res => res.json()).then(data => { if (Array.isArray(data)) setLeads(data); })
       .catch(console.error).finally(() => setLoading(false));
 
+    // Inicializa Facebook SDK
     window.fbAsyncInit = function() {
-        window.FB.init({ appId: '928590639502117', cookie: true, xfbml: true, version: 'v19.0' });
+        window.FB.init({ 
+          appId      : '1566054111352118', // <--- COLOQUE O ID DO NOVO APP "EMPRESA" AQUI
+          cookie     : true,
+          xfbml      : true,
+          version    : 'v19.0'
+        });
     };
+    
     (function(d, s, id){
        var js, fjs = d.getElementsByTagName(s)[0];
        if (d.getElementById(id)) {return;}
@@ -67,6 +80,7 @@ export function MarketingCRM() {
     checkMetaConnection();
   }, []);
 
+  // --- FUNÇÕES DE CONEXÃO ---
   const checkMetaConnection = async () => {
     try {
         const token = localStorage.getItem('odonto_token');
@@ -87,11 +101,23 @@ export function MarketingCRM() {
 
   const handleFacebookLogin = () => {
     setAuthLoading(true);
-    if (!window.FB) return alert("Erro no SDK Facebook");
+    if (!window.FB) {
+        alert("Erro: Facebook SDK bloqueado. Desative o AdBlock.");
+        setAuthLoading(false);
+        return;
+    }
+    
+    // Lista de Permissões (O App ID precisa ser 'EMPRESA' para aceitar leads_retrieval)
+    const permissions = 'public_profile,email,pages_show_list,ads_management,ads_read,leads_retrieval,instagram_basic,pages_read_engagement';
+
     window.FB.login((response: any) => {
-        if (response.authResponse) sendTokenToBackend(response.authResponse.accessToken);
-        else setAuthLoading(false);
-    }, { scope: 'ads_management,ads_read,leads_retrieval,instagram_basic,pages_show_list,pages_read_engagement' });
+        if (response.authResponse) {
+            sendTokenToBackend(response.authResponse.accessToken);
+        } else {
+            console.log("Login cancelado ou erro de popup");
+            setAuthLoading(false);
+        }
+    }, { scope: permissions });
   };
 
   const sendTokenToBackend = async (fbToken: string) => {
@@ -103,15 +129,17 @@ export function MarketingCRM() {
         });
         if (res.ok) { 
             setIsConnected(true); 
-            alert("Conectado com Sucesso!");
+            alert("Conectado com Sucesso! Agora selecione sua conta de anúncios.");
             checkMetaConnection(); 
+        } else {
+            const err = await res.json();
+            alert("Erro ao salvar: " + (err.error || "Tente novamente"));
         }
-    } catch (error) { alert("Erro ao conectar."); } finally { setAuthLoading(false); }
+    } catch (error) { alert("Erro de rede."); } finally { setAuthLoading(false); }
   };
 
-  // --- NOVA FUNÇÃO: DESCONECTAR ---
   const handleDisconnect = async () => {
-    if (!window.confirm("Deseja realmente desconectar a conta do Facebook/Instagram?")) return;
+    if (!window.confirm("Deseja desconectar? Os dados automáticos pararão de atualizar.")) return;
     setAuthLoading(true);
     try {
         const res = await fetch('/api/marketing/meta/disconnect', {
@@ -122,14 +150,16 @@ export function MarketingCRM() {
             setIsConnected(false);
             setAdsStats({ spend: 0.0, clicks: 0, cpc: 0.0 });
             setMediaList([]);
-            alert("Desconectado com sucesso.");
+            alert("Desconectado.");
         }
     } catch (e) { alert("Erro ao desconectar."); }
     finally { setAuthLoading(false); }
   };
 
+  // --- FUNÇÕES DE MÍDIA E IA ---
   const fetchMedia = async (source: 'instagram' | 'facebook') => {
-    if (!isConnected) return;
+    if (!isConnected) return alert("Conecte sua conta primeiro na aba Funil!");
+    
     setMediaLoading(true);
     setIgError(null);
     setMediaSource(source);
@@ -144,7 +174,7 @@ export function MarketingCRM() {
         if (res.ok) {
             setMediaList(data);
         } else {
-            setIgError(data.error || "Erro ao buscar mídia.");
+            setIgError(data.error || `Erro ao buscar mídia do ${source}. Verifique as permissões.`);
             setMediaList([]);
         }
     } catch (e) { 
@@ -168,6 +198,7 @@ export function MarketingCRM() {
     finally { setIsGenerating(false); }
   };
 
+  // --- FUNÇÕES DE LEADS MANUAIS ---
   const handleCreateLead = async (e: React.FormEvent) => { 
       e.preventDefault(); 
       try {
@@ -180,7 +211,7 @@ export function MarketingCRM() {
         setLeads([...leads, saved]);
         setIsModalOpen(false);
         setNewLead({ name: '', phone: '', source: 'Manual', notes: '' });
-      } catch(e) { alert("Erro ao criar"); }
+      } catch(e) { alert("Erro ao criar lead manual"); }
   };
 
   const onDragEnd = async (result: DropResult) => { 
@@ -198,6 +229,7 @@ export function MarketingCRM() {
   return (
     <div className="p-8 w-full h-screen overflow-hidden flex flex-col bg-gray-50 relative font-sans">
       
+      {/* HEADER PRINCIPAL */}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 flex-shrink-0">
         <div>
           <h1 className="text-3xl font-black text-gray-900 tracking-tight">Marketing & Ads</h1>
@@ -214,28 +246,34 @@ export function MarketingCRM() {
                     Funil de Vendas
                 </button>
                 <button 
-                    onClick={() => { setActiveTab('creative'); fetchMedia('instagram'); }}
+                    onClick={() => { setActiveTab('creative'); if(isConnected) fetchMedia('instagram'); }}
                     className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'creative' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
                 >
                     <Wand2 size={14} /> Criador IA
                 </button>
             </div>
 
-            {/* BOTÃO NOVO LEAD MANUAL (MANTIDO!) */}
+            {/* BOTÃO NOVO LEAD MANUAL (MANTIDO E DESTACADO) */}
             <button onClick={() => setIsModalOpen(true)} className="px-6 py-3 bg-gray-900 text-white rounded-xl font-bold text-sm hover:bg-gray-800 flex items-center gap-2 shadow-xl shadow-gray-200 transition-all active:scale-95">
                 <Plus size={18} /> Novo Lead
             </button>
         </div>
       </header>
 
-      {/* --- ABA: FUNIL DE VENDAS --- */}
+      {/* --- ABA 1: FUNIL DE VENDAS --- */}
       {activeTab === 'funnel' && (
         <>
             <div className="mb-6 flex-shrink-0">
                 {checkingAuth ? ( <div className="h-24 bg-gray-100 rounded-3xl animate-pulse"></div> ) : !isConnected ? (
-                    <button onClick={handleFacebookLogin} disabled={authLoading} className="flex items-center gap-2 px-5 py-3 bg-[#1877F2] text-white rounded-xl font-bold shadow-lg hover:bg-[#166fe5]">
-                        <Facebook size={20} /> {authLoading ? 'Conectando...' : 'Vincular Facebook & Instagram'}
-                    </button>
+                    <div className="bg-white p-6 rounded-3xl border border-blue-100 shadow-sm flex items-center justify-between">
+                        <div>
+                            <h3 className="font-bold text-gray-800 text-lg">Conectar Redes Sociais</h3>
+                            <p className="text-gray-500 text-sm">Vincule Facebook e Instagram para importar leads e posts.</p>
+                        </div>
+                        <button onClick={handleFacebookLogin} disabled={authLoading} className="flex items-center gap-2 px-6 py-3 bg-[#1877F2] text-white rounded-xl font-bold shadow-lg hover:bg-[#166fe5] transition-all active:scale-95">
+                            <Facebook size={20} /> {authLoading ? 'Conectando...' : 'Conectar Agora'}
+                        </button>
+                    </div>
                 ) : (
                     <div className="flex justify-between items-start gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
                         {/* STATS */}
@@ -247,11 +285,12 @@ export function MarketingCRM() {
                             </div>
                         </div>
                         
-                        {/* BOTÃO DESCONECTAR (NOVO) */}
+                        {/* BOTÃO DESCONECTAR */}
                         <button 
                             onClick={handleDisconnect} 
                             disabled={authLoading}
                             className="bg-red-50 text-red-600 border border-red-200 p-4 rounded-2xl shadow-sm flex items-center justify-center gap-2 font-bold cursor-pointer hover:bg-red-100 active:scale-95 transition-all h-full"
+                            title="Desconectar conta"
                         >
                             <LogOut size={18} />
                         </button>
@@ -263,10 +302,19 @@ export function MarketingCRM() {
                 <div className="flex-1 overflow-x-auto pb-4"><div className="flex gap-6 h-full min-w-[1200px]">
                     {Object.entries(COLUMNS).map(([id, cfg]) => (
                         <div key={id} className="flex flex-col bg-gray-200/30 rounded-[2rem] w-80 h-full border border-gray-200/50">
-                            <div className={`bg-white p-4 rounded-t-[2rem] border-t-8 ${cfg.color} font-black text-xs uppercase ${cfg.headerColor}`}>{cfg.title}</div>
+                            <div className={`bg-white p-4 rounded-t-[2rem] border-t-8 ${cfg.color} font-black text-xs uppercase ${cfg.headerColor} flex justify-between`}>
+                                <span>{cfg.title}</span>
+                                <span className="bg-gray-100 px-2 rounded text-gray-500">{getColumnLeads(id).length}</span>
+                            </div>
                             <Droppable droppableId={id}>{(p, s) => (<div {...p.droppableProps} ref={p.innerRef} className="flex-1 p-4 flex flex-col gap-3 overflow-y-auto">{getColumnLeads(id).map((item, idx) => (
                                 <Draggable key={item.id} draggableId={String(item.id)} index={idx}>{(p, s) => (
-                                    <div ref={p.innerRef} {...p.draggableProps} {...p.dragHandleProps} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><div className="font-bold text-sm">{item.name}</div><div className="text-xs text-gray-400 mt-1">{item.source}</div></div>
+                                    <div ref={p.innerRef} {...p.draggableProps} {...p.dragHandleProps} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 group hover:border-blue-300 transition-all">
+                                        <div className="font-bold text-sm text-gray-800">{item.name}</div>
+                                        <div className="flex items-center gap-1 text-[10px] text-gray-400 mt-2 uppercase font-bold">
+                                            <div className={`w-1.5 h-1.5 rounded-full ${item.source === 'Instagram' ? 'bg-purple-500' : item.source === 'Facebook' ? 'bg-blue-600' : 'bg-gray-400'}`}></div>
+                                            {item.source}
+                                        </div>
+                                    </div>
                                 )}</Draggable>
                             ))}{p.placeholder}</div>)}</Droppable>
                         </div>
@@ -276,7 +324,7 @@ export function MarketingCRM() {
         </>
       )}
 
-      {/* --- ABA: CRIADOR IA --- */}
+      {/* --- ABA 2: CRIADOR IA --- */}
       {activeTab === 'creative' && (
         <div className="flex gap-6 h-full overflow-hidden">
             {/* Galeria */}
@@ -289,8 +337,8 @@ export function MarketingCRM() {
                     
                     {/* Botões de Troca de Fonte */}
                     <div className="flex bg-gray-100 p-1 rounded-lg">
-                        <button onClick={() => fetchMedia('instagram')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${mediaSource === 'instagram' ? 'bg-white shadow text-pink-600' : 'text-gray-500'}`}>Instagram</button>
-                        <button onClick={() => fetchMedia('facebook')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${mediaSource === 'facebook' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}>Facebook</button>
+                        <button onClick={() => fetchMedia('instagram')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${mediaSource === 'instagram' ? 'bg-white shadow text-pink-600' : 'text-gray-500 hover:text-gray-700'}`}>Instagram</button>
+                        <button onClick={() => fetchMedia('facebook')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${mediaSource === 'facebook' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>Facebook</button>
                     </div>
                 </div>
                 
@@ -300,11 +348,11 @@ export function MarketingCRM() {
                         <p>Conecte as Redes Sociais na aba "Funil" primeiro.</p>
                     </div>
                 ) : mediaLoading ? (
-                    <div className="h-64 flex flex-col items-center justify-center text-gray-400"><Loader2 className="animate-spin mb-2 text-purple-600" size={32}/><p>Buscando fotos...</p></div>
+                    <div className="h-64 flex flex-col items-center justify-center text-gray-400"><Loader2 className="animate-spin mb-2 text-purple-600" size={32}/><p>Buscando posts...</p></div>
                 ) : igError ? (
                     <div className="bg-red-50 p-6 rounded-2xl border border-red-100 flex flex-col items-center text-center">
                         <AlertTriangle className="text-red-500 mb-2" size={32}/>
-                        <h4 className="text-red-800 font-bold mb-1">Mídia não encontrada</h4>
+                        <h4 className="text-red-800 font-bold mb-1">Ops! Algo deu errado.</h4>
                         <p className="text-red-600 text-sm mb-4 max-w-md">{igError}</p>
                     </div>
                 ) : (
@@ -312,6 +360,7 @@ export function MarketingCRM() {
                         {mediaList.map((media) => (
                             <div key={media.id} onClick={() => { setSelectedMedia(media); setAiCaption(''); }} className={`relative aspect-square rounded-xl overflow-hidden cursor-pointer border-4 transition-all ${selectedMedia?.id === media.id ? 'border-purple-500 scale-95' : 'border-transparent hover:scale-105'}`}>
                                 <img src={media.media_type === 'VIDEO' ? media.thumbnail_url : media.media_url} alt="Post" className="w-full h-full object-cover" />
+                                {media.media_type === 'VIDEO' && <div className="absolute top-2 right-2 bg-black/50 text-white text-[10px] px-2 rounded">VÍDEO</div>}
                             </div>
                         ))}
                     </div>
@@ -327,7 +376,9 @@ export function MarketingCRM() {
                         <>
                             <div className="mb-4">
                                 <label className="text-xs font-black uppercase text-gray-400">Legenda Original</label>
-                                <p className="text-xs text-gray-500 bg-gray-50 p-3 rounded-xl mt-1 line-clamp-3 italic">"{selectedMedia.caption || 'Sem legenda'}"</p>
+                                <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-xl mt-1 max-h-24 overflow-y-auto italic">
+                                    "{selectedMedia.caption || 'Post sem legenda'}"
+                                </div>
                             </div>
 
                             <button 
@@ -352,8 +403,9 @@ export function MarketingCRM() {
                             </div>
                         </>
                     ) : (
-                        <div className="flex-1 flex items-center justify-center text-center text-gray-400 text-sm px-8">
-                            Selecione uma imagem ao lado para começar a mágica.
+                        <div className="flex-1 flex flex-col items-center justify-center text-center text-gray-400 text-sm px-8 gap-4">
+                            <FileText size={48} className="opacity-20"/>
+                            <p>Selecione uma imagem ao lado para a Inteligência Artificial criar uma legenda de alta conversão.</p>
                         </div>
                     )}
                 </div>
@@ -361,7 +413,7 @@ export function MarketingCRM() {
         </div>
       )}
       
-      {/* MODAL NOVO LEAD (MANTIDO) */}
+      {/* MODAL NOVO LEAD (MANTIDO!) */}
       {isModalOpen && (
           <div className="fixed inset-0 z-[100] bg-slate-900/60 flex items-center justify-center backdrop-blur-sm p-4">
               <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl w-full max-w-md animate-in fade-in zoom-in duration-200 border border-white">
