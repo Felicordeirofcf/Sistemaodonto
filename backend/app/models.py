@@ -7,11 +7,12 @@ class Clinic(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     cnpj_cpf = db.Column(db.String(20), unique=True)
-    plan_type = db.Column(db.String(20), default='pro')
+    plan_type = db.Column(db.String(20), default='Bronze') # Alinhado com as rotas
     max_dentists = db.Column(db.Integer, default=1)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # Relacionamentos
     users = db.relationship('User', backref='clinic', lazy=True)
     patients = db.relationship('Patient', backref='clinic', lazy=True)
     inventory_items = db.relationship('InventoryItem', backref='clinic', lazy=True)
@@ -20,101 +21,87 @@ class Clinic(db.Model):
     transactions = db.relationship('Transaction', backref='clinic', lazy=True)
     procedures = db.relationship('Procedure', backref='clinic', lazy=True)
 
-# 2. USUÁRIOS
+# 2. USUÁRIOS (Logins do Sistema)
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
+    name = db.Column(db.String(100), nullable=False) # Campo 'name' confirmado
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
     role = db.Column(db.String(20), default='dentist')
+    is_active = db.Column(db.Boolean, default=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
 
-# 3. PACIENTES (CORRIGIDO: Adicionado campo 'status')
+# 3. PACIENTES
 class Patient(db.Model):
     __tablename__ = 'patients'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
-    cpf = db.Column(db.String(14), unique=True)
+    cpf = db.Column(db.String(14), unique=True, nullable=True)
     phone = db.Column(db.String(20), nullable=False)
-    email = db.Column(db.String(120))
-    birth_date = db.Column(db.Date)
-    address = db.Column(db.String(200))
-    source = db.Column(db.String(50))
-    anamnese = db.Column(db.JSON) 
-    odontogram_data = db.Column(db.JSON, nullable=True) 
-    last_visit = db.Column(db.DateTime)
-    # Coluna essencial para evitar o erro TypeError
+    email = db.Column(db.String(120), nullable=True)
+    address = db.Column(db.String(200), nullable=True)
+    source = db.Column(db.String(50), default='Manual')
     status = db.Column(db.String(20), default='ativo') 
+    odontogram_data = db.Column(db.JSON, nullable=True) # JSON para persistência do 3D
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-# 4. ESTOQUE (CORRIGIDO: Adicionado min_quantity e purchase_price)
+# 4. ESTOQUE (Itens de Consumo)
 class InventoryItem(db.Model):
     __tablename__ = 'inventory_items'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
-    category = db.Column(db.String(50))
     quantity = db.Column(db.Float, default=0.0)
-    # Colunas que estavam faltando no seu banco e gerando erro 500
-    min_quantity = db.Column(db.Float, default=5.0)
-    purchase_price = db.Column(db.Float, default=0.0)
-    unit = db.Column(db.String(20))
+    min_stock = db.Column(db.Float, default=5.0) # Alinhado com alertas de estoque
+    unit = db.Column(db.String(20), default='unidade')
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
 
-# 5. CONFIGURAÇÃO DE PROCEDIMENTOS
+# 5. PROCEDIMENTOS E FICHAS TÉCNICAS
 class Procedure(db.Model):
     __tablename__ = 'procedures'
     id = db.Column(db.Integer, primary_key=True)
-    clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
     name = db.Column(db.String(100), nullable=False)
     price = db.Column(db.Float, default=0.0)
-    requirements = db.relationship('ProcedureRequirement', backref='procedure', lazy=True)
+    clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
+    requirements = db.relationship('ProcedureRequirement', backref='procedure', lazy=True, cascade="all, delete-orphan")
 
 class ProcedureRequirement(db.Model):
     __tablename__ = 'procedure_requirements'
     id = db.Column(db.Integer, primary_key=True)
     procedure_id = db.Column(db.Integer, db.ForeignKey('procedures.id'), nullable=False)
     inventory_item_id = db.Column(db.Integer, db.ForeignKey('inventory_items.id'), nullable=False)
-    quantity_needed = db.Column(db.Float, nullable=False)
-    item = db.relationship('InventoryItem')
+    quantity = db.Column(db.Float, nullable=False) # Quantidade que será abatida no estoque
 
 # 6. MARKETING / CRM
 class Lead(db.Model):
     __tablename__ = 'leads'
     id = db.Column(db.Integer, primary_key=True)
-    clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
     name = db.Column(db.String(100), nullable=False)
     phone = db.Column(db.String(20))
-    source = db.Column(db.String(50))
+    source = db.Column(db.String(50), default='Instagram')
     status = db.Column(db.String(50), default='new') 
-    notes = db.Column(db.Text)
+    clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    def to_dict(self):
-        return {'id': self.id, 'name': self.name, 'phone': self.phone, 'source': self.source, 'status': self.status, 'notes': self.notes}
 
 # 7. AGENDA
 class Appointment(db.Model):
     __tablename__ = 'appointments'
     id = db.Column(db.Integer, primary_key=True)
-    clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
-    patient_id = db.Column(db.Integer, db.ForeignKey('patients.id'), nullable=False)
     date_time = db.Column(db.DateTime, nullable=False)
-    service = db.Column(db.String(200)) 
-    status = db.Column(db.String(20), default='agendado')
-    price = db.Column(db.Float, default=0.0)
-    is_paid = db.Column(db.Boolean, default=False)
-    patient = db.relationship('Patient', backref='appointments_list')
+    patient_name = db.Column(db.String(100)) # Fallback para agendamentos rápidos
+    procedure = db.Column(db.String(100))
+    status = db.Column(db.String(20), default='confirmed')
+    patient_id = db.Column(db.Integer, db.ForeignKey('patients.id'), nullable=True)
+    clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
 
-# 8. FINANCEIRO
+# 8. FINANCEIRO (Receitas e Despesas)
 class Transaction(db.Model):
     __tablename__ = 'transactions'
     id = db.Column(db.Integer, primary_key=True)
-    clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
     description = db.Column(db.String(200), nullable=False)
     amount = db.Column(db.Float, nullable=False)
-    cost = db.Column(db.Float, default=0.0)
-    type = db.Column(db.String(20), nullable=False)
-    category = db.Column(db.String(50))
+    type = db.Column(db.String(20), nullable=False) # 'income' ou 'expense'
+    category = db.Column(db.String(50), default='Outros')
     date = db.Column(db.DateTime, default=datetime.utcnow)
-    appointment_id = db.Column(db.Integer, db.ForeignKey('appointments.id'), nullable=True)
+    clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)

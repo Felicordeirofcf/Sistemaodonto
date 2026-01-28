@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Calendar as CalIcon, ChevronLeft, ChevronRight, Plus, 
-  Check, Clock, AlertCircle, Loader2, Search 
+  Check, Clock, AlertCircle, Loader2, X 
 } from 'lucide-react';
 
 type Status = 'confirmed' | 'pending' | 'canceled' | 'completed';
@@ -19,36 +19,68 @@ interface Appointment {
 export function Agenda() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // ESTADOS PARA O NOVO AGENDAMENTO
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [newAppt, setNewAppt] = useState({ 
+    patient_name: '', 
+    procedure: 'Avaliação', 
+    date: '', 
+    time: '09:00',
+    duration: 1 
+  });
 
-  // Simulação de carregamento do banco que acabamos de popular
-  useEffect(() => {
-    const fetchAgenda = async () => {
-      try {
-        const token = localStorage.getItem('odonto_token');
-        // No futuro, esta rota buscará os dados do seu seed_db.py
-        const res = await fetch('/api/appointments', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await res.json();
-        
-        // Fallback para os dados do Seed caso a rota ainda não esteja pronta
-        if (Array.isArray(data) && data.length > 0) {
-          setAppointments(data);
-        } else {
-          setAppointments([
-            { id: '1', patient: 'Carlos Eduardo', procedure: 'Avaliação Geral', day: 1, hour: 9, duration: 1, status: 'confirmed' },
-            { id: '2', patient: 'Mariana Souza', procedure: 'Clareamento', day: 1, hour: 14, duration: 2, status: 'confirmed' },
-            { id: '3', patient: 'Roberto Lima', procedure: 'Extração', day: 2, hour: 10, duration: 1, status: 'pending' },
-          ]);
-        }
-      } catch (error) {
-        console.error("Erro ao carregar agenda", error);
-      } finally {
-        setLoading(false);
+  const fetchAgenda = async () => {
+    try {
+      const token = localStorage.getItem('odonto_token');
+      const res = await fetch('/api/appointments', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      
+      if (Array.isArray(data) && data.length > 0) {
+        setAppointments(data);
+      } else {
+        // Fallback para visualização inicial
+        setAppointments([
+          { id: '1', patient: 'Carlos Eduardo', procedure: 'Avaliação Geral', day: 1, hour: 9, duration: 1, status: 'confirmed' },
+          { id: '2', patient: 'Mariana Souza', procedure: 'Clareamento', day: 1, hour: 14, duration: 2, status: 'confirmed' },
+          { id: '3', patient: 'Roberto Lima', procedure: 'Extração', day: 2, hour: 10, duration: 1, status: 'pending' },
+        ]);
       }
-    };
-    fetchAgenda();
-  }, []);
+    } catch (error) {
+      console.error("Erro ao carregar agenda", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchAgenda(); }, []);
+
+  // FUNÇÃO PARA SALVAR NO BANCO
+  const handleCreateAppointment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const res = await fetch('/api/appointments', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('odonto_token')}` 
+        },
+        body: JSON.stringify(newAppt)
+      });
+      if (res.ok) {
+        setIsModalOpen(false);
+        fetchAgenda(); // Recarrega a grade com o novo paciente
+      }
+    } catch (error) {
+      console.error("Erro ao agendar:", error);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const hours = Array.from({ length: 11 }, (_, i) => i + 8);
   const weekDays = [
@@ -73,7 +105,64 @@ export function Agenda() {
   );
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 p-8 font-sans overflow-hidden">
+    <div className="flex flex-col h-screen bg-gray-50 p-8 font-sans overflow-hidden relative">
+      
+      {/* MODAL DE NOVO HORÁRIO */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white p-8 rounded-[2.5rem] w-full max-w-md shadow-2xl animate-in zoom-in duration-200">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-black text-gray-800">Agendar Consulta</h3>
+              <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+                <X size={20} className="text-gray-400" />
+              </button>
+            </div>
+            
+            <form onSubmit={handleCreateAppointment} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Paciente</label>
+                <input 
+                  required
+                  placeholder="Nome do Paciente" 
+                  className="w-full p-3 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  value={newAppt.patient_name}
+                  onChange={e => setNewAppt({...newAppt, patient_name: e.target.value})}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Data</label>
+                  <input type="date" required className="w-full p-3 bg-gray-50 border rounded-xl outline-none" onChange={e => setNewAppt({...newAppt, date: e.target.value})} />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Horário</label>
+                  <input type="time" required className="w-full p-3 bg-gray-50 border rounded-xl outline-none" value={newAppt.time} onChange={e => setNewAppt({...newAppt, time: e.target.value})} />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Procedimento</label>
+                <select className="w-full p-3 bg-gray-50 border rounded-xl outline-none" value={newAppt.procedure} onChange={e => setNewAppt({...newAppt, procedure: e.target.value})}>
+                  <option value="Avaliação">Avaliação</option>
+                  <option value="Limpeza">Limpeza</option>
+                  <option value="Extração">Extração</option>
+                  <option value="Clareamento">Clareamento</option>
+                </select>
+              </div>
+
+              <button 
+                type="submit" 
+                disabled={saving}
+                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest mt-4 shadow-xl shadow-blue-100 flex items-center justify-center gap-2"
+              >
+                {saving ? <Loader2 className="animate-spin" /> : 'Confirmar Agendamento'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
           <h1 className="text-3xl font-black text-gray-900 tracking-tight flex items-center gap-3">
@@ -91,14 +180,17 @@ export function Agenda() {
             <span className="font-black text-gray-700 px-4 text-xs uppercase tracking-widest">Janeiro, 2026</span>
             <button className="p-2 hover:bg-gray-50 text-gray-400 rounded-xl transition-all"><ChevronRight size={20} /></button>
           </div>
-          <button className="bg-blue-600 text-white px-6 py-3 rounded-2xl flex items-center gap-2 hover:bg-blue-700 shadow-xl shadow-blue-100 text-xs font-black uppercase tracking-widest transition-all active:scale-95">
+          {/* BOTÃO AGORA ATIVA O MODAL */}
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="bg-blue-600 text-white px-6 py-3 rounded-2xl flex items-center gap-2 hover:bg-blue-700 shadow-xl shadow-blue-100 text-xs font-black uppercase tracking-widest transition-all active:scale-95"
+          >
             <Plus size={18} /> Novo Horário
           </button>
         </div>
       </header>
 
       <div className="flex-1 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden flex flex-col relative">
-        {/* Header da Grade */}
         <div className="grid grid-cols-6 bg-gray-50/50 border-b border-gray-100">
           <div className="p-4 border-r border-gray-100 text-center text-[10px] font-black text-gray-400 uppercase tracking-widest">Hora</div>
           {weekDays.map(d => (
@@ -111,7 +203,6 @@ export function Agenda() {
           ))}
         </div>
 
-        {/* Corpo da Grade */}
         <div className="flex-1 overflow-y-auto custom-scrollbar">
           <div className="grid grid-cols-6 relative">
             <div className="border-r border-gray-100 bg-gray-50/20">
@@ -129,7 +220,10 @@ export function Agenda() {
                   return (
                     <div key={`${dayInfo.day}-${hour}`} className="h-24 border-b border-gray-50 border-dashed relative group hover:bg-blue-50/20 transition-colors">
                       {!appt && (
-                        <button className="absolute inset-0 w-full h-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                        <button onClick={() => {
+                          setNewAppt({...newAppt, time: `${hour.toString().padStart(2, '0')}:00`});
+                          setIsModalOpen(true);
+                        }} className="absolute inset-0 w-full h-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                           <Plus size={20} className="text-blue-300"/>
                         </button>
                       )}

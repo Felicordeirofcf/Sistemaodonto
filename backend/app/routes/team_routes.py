@@ -5,7 +5,7 @@ from werkzeug.security import generate_password_hash
 
 team_bp = Blueprint('team', __name__)
 
-# 1. ROTA DE ESTATÍSTICAS (Resolve o 404 e fornece metadados do plano)
+# 1. ROTA DE ESTATÍSTICAS (Fornece metadados do plano SaaS)
 @team_bp.route('/clinic/team-stats', methods=['GET'])
 @jwt_required()
 def get_team_stats():
@@ -45,12 +45,12 @@ def list_team():
 
         team = User.query.filter_by(clinic_id=current_user.clinic_id).all()
         
-        # Verificação segura de atributos para evitar o erro 500
         output = []
         for u in team:
+            # CORREÇÃO: Usando 'name' conforme identificado no seu banco
             output.append({
                 'id': u.id,
-                'name': getattr(u, 'user_name', u.email), # Fallback para email se nome for null
+                'name': getattr(u, 'name', u.email), 
                 'email': u.email,
                 'role': u.role,
                 'is_active': getattr(u, 'is_active', True)
@@ -61,7 +61,7 @@ def list_team():
         print(f"Erro List Team: {str(e)}") 
         return jsonify({'error': 'Erro ao listar membros da equipe'}), 500
 
-# 3. CADASTRAR NOVO MEMBRO (Rota POST com Trava de Plano SaaS)
+# 3. CADASTRAR NOVO PROFISSIONAL (Com Trava de Plano)
 @team_bp.route('/clinic/team', methods=['POST'])
 @jwt_required()
 def create_team_member():
@@ -70,7 +70,7 @@ def create_team_member():
         admin_user = User.query.get(user_id)
         data = request.get_json()
 
-        # Validação de Limite do Plano SaaS
+        # Validação de Limite do Plano
         if data.get('role') == 'dentist':
             current_dentists = User.query.filter_by(
                 clinic_id=admin_user.clinic_id, 
@@ -78,35 +78,28 @@ def create_team_member():
             ).count()
             
             limit = admin_user.clinic.max_dentists or 1
-            
             if current_dentists >= limit:
                 return jsonify({
-                    'error': f'Limite de dentistas atingido para o plano {admin_user.clinic.plan_type}.'
+                    'error': f'Limite atingido para o plano {admin_user.clinic.plan_type}.'
                 }), 403
 
-        # Verificação de e-mail duplicado no banco
+        # Verificação de e-mail duplicado
         if User.query.filter_by(email=data['email']).first():
-            return jsonify({'error': 'Este e-mail já está cadastrado no sistema.'}), 400
+            return jsonify({'error': 'Este e-mail já está cadastrado.'}), 400
 
-        # Criação do novo usuário vinculado à clínica
+        # Criação usando 'name' e gerando hash seguro
         new_member = User(
-            user_name=data['name'],
+            name=data.get('name') or data.get('user_name'),
             email=data['email'],
             role=data.get('role', 'dentist'),
             clinic_id=admin_user.clinic_id,
-            # Gera hash seguro da senha (padrão 123456 ou enviada)
             password_hash=generate_password_hash(data.get('password', '123456'))
         )
 
         db.session.add(new_member)
         db.session.commit()
 
-        return jsonify({
-            'id': new_member.id,
-            'name': new_member.user_name,
-            'email': new_member.email,
-            'role': new_member.role
-        }), 201
+        return jsonify({'id': new_member.id, 'message': 'Cadastrado com sucesso!'}), 201
 
     except Exception as e:
         db.session.rollback()

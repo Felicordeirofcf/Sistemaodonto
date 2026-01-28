@@ -52,7 +52,7 @@ def create_app():
     from .routes.auth_routes import auth_bp
     app.register_blueprint(auth_bp, url_prefix='/auth')
     
-    # 2. API Principal (Pacientes, Estoque, Dashboard, etc)
+    # 2. API Principal (Pacientes, Estoque, Dashboard, Equipe, etc)
     from .routes.patient_routes import patient_bp
     app.register_blueprint(patient_bp, url_prefix='/api')
     
@@ -75,10 +75,10 @@ def create_app():
     app.register_blueprint(financial_bp, url_prefix='/api')
 
     from .routes.team_routes import team_bp
-    app.register_blueprint(team_bp, url_prefix='/api') 
+    app.register_blueprint(team_bp, url_prefix='/api') # Rota de Gestão de Equipe
 
     from .routes.procedure_routes import procedure_bp
-    app.register_blueprint(procedure_bp, url_prefix='/api')
+    app.register_blueprint(procedure_bp, url_prefix='/api') # Rota de Fichas Técnicas
 
     # --- ROTAS DE UTILIDADE & NAVEGAÇÃO ---
 
