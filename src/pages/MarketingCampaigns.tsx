@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { 
   MessageSquare, Zap, AlertCircle, Megaphone, 
-  Sparkles, Play, Loader2, Target, BarChart3 
+  Sparkles, Play, Loader2, Target, BarChart3,
+  Facebook, RefreshCw, CheckCircle
 } from 'lucide-react';
 
 interface RecallPatient {
@@ -17,7 +18,10 @@ export function MarketingCampaigns() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   
-  // Estados para a Automação de Anúncios
+  // Estados para Sincronização Meta
+  const [metaData, setMetaData] = useState<{balance: number, ad_account_id: string, last_sync: string} | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  
   const [budget, setBudget] = useState(300);
   const [adsActive, setAdsActive] = useState(false);
   const [adsLoading, setAdsLoading] = useState(false);
@@ -39,6 +43,26 @@ export function MarketingCampaigns() {
     })
     .finally(() => setLoading(false));
   }, []);
+
+  // Função para Sincronizar Saldo Real/Fictício da Meta
+  const handleMetaSync = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/marketing/meta/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('odonto_token')}`
+        }
+      });
+      const data = await res.json();
+      if (res.ok) setMetaData(data);
+    } catch (e) {
+      console.error("Erro ao sincronizar com Meta");
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const handleActivateAds = async () => {
     setAdsLoading(true);
@@ -84,44 +108,63 @@ export function MarketingCampaigns() {
         <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-10 text-white relative">
           <div className="relative z-10 max-w-2xl">
             <h2 className="text-2xl font-black uppercase tracking-widest mb-2">OdontoAds Inteligente</h2>
-            <p className="text-blue-100 font-medium">Atraia pacientes novos automaticamente no Instagram e Facebook.</p>
+            <p className="text-blue-100 font-medium">Sincronize sua conta de anúncios e deixe nossa IA trabalhar por você.</p>
           </div>
           <Megaphone size={120} className="absolute -right-5 -bottom-5 text-white/10 -rotate-12" />
         </div>
         
         <div className="p-10 grid grid-cols-1 lg:grid-cols-3 gap-10">
+          {/* Card de Conexão e Saldo Meta */}
           <div className="space-y-6">
-            <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest">Orçamento Mensal</label>
-            <div className="flex items-end gap-2">
-              <span className="text-4xl font-black text-gray-900 tracking-tighter text-blue-600">R$ {budget}</span>
-              <span className="text-gray-400 font-bold mb-1">/mês</span>
-            </div>
-            <input 
-              type="range" min="300" max="5000" step="100"
-              className="w-full h-2 bg-gray-100 rounded-full appearance-none cursor-pointer accent-blue-600"
-              value={budget} onChange={(e) => setBudget(Number(e.target.value))}
-            />
+            <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Sincronização de Saldo</h3>
+            {!metaData ? (
+              <button 
+                onClick={handleMetaSync}
+                disabled={syncing}
+                className="w-full py-5 bg-[#1877F2] text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-[#166fe5] transition-all shadow-lg"
+              >
+                {syncing ? <Loader2 className="animate-spin" /> : <Facebook size={18} />}
+                {syncing ? 'Conectando...' : 'Vincular Conta Facebook'}
+              </button>
+            ) : (
+              <div className="p-6 bg-blue-50 rounded-[2rem] border border-blue-100 animate-in zoom-in duration-300">
+                <div className="flex justify-between items-start mb-2">
+                  <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest">Saldo na Meta</span>
+                  <CheckCircle size={16} className="text-blue-500" />
+                </div>
+                <h4 className="text-3xl font-black text-blue-900 tracking-tighter">R$ {metaData.balance.toFixed(2)}</h4>
+                <p className="text-[9px] text-blue-400 font-bold mt-2 uppercase">Conta: {metaData.ad_account_id}</p>
+              </div>
+            )}
+            
             <button 
               onClick={handleActivateAds}
-              disabled={adsLoading || adsActive}
+              disabled={adsLoading || adsActive || !metaData}
               className={`w-full py-5 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-3 ${
-                adsActive ? 'bg-green-500 text-white shadow-green-100' : 'bg-blue-600 text-white shadow-blue-100 hover:bg-blue-700 shadow-xl'
-              }`}
+                adsActive ? 'bg-green-500 text-white shadow-green-100' : 'bg-gray-900 text-white shadow-gray-200 hover:bg-black'
+              } disabled:opacity-30`}
             >
               {adsLoading ? <Loader2 className="animate-spin" /> : adsActive ? <Zap /> : <Play />}
-              {adsLoading ? 'Sincronizando...' : adsActive ? 'IA de Anúncios Ativa' : 'Iniciar Crescimento'}
+              {adsLoading ? 'Iniciando...' : adsActive ? 'IA de Anúncios Ativa' : 'Ativar Piloto Automático'}
             </button>
           </div>
 
           <div className="bg-gray-50 rounded-[2.5rem] p-8 space-y-4 border border-gray-100">
-            <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Previsão de Resultados</h3>
-            <div className="flex justify-between font-bold text-sm">
-              <span className="text-gray-500 flex items-center gap-2"><Target size={14}/> Alcance</span>
-              <span className="text-gray-900">~{budget * 15} pessoas</span>
+            <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Configurar Gasto Mensal</h3>
+            <div className="flex items-end gap-1 mb-4">
+              <span className="text-3xl font-black text-gray-900 tracking-tighter">R$ {budget}</span>
+              <span className="text-[10px] font-bold text-gray-400 mb-1">/mês</span>
             </div>
-            <div className="flex justify-between font-bold text-sm">
-              <span className="text-gray-500 flex items-center gap-2"><BarChart3 size={14}/> Leads</span>
-              <span className="text-blue-600">~{Math.floor(budget / 10)} contatos</span>
+            <input 
+              type="range" min="300" max="5000" step="100"
+              className="w-full h-2 bg-gray-200 rounded-full appearance-none cursor-pointer accent-blue-600"
+              value={budget} onChange={(e) => setBudget(Number(e.target.value))}
+            />
+            <div className="pt-4 space-y-3">
+              <div className="flex justify-between font-bold text-[11px] uppercase text-gray-400">
+                <span>Expectativa Leads</span>
+                <span className="text-blue-600">~{Math.floor(budget / 12)} pacientes</span>
+              </div>
             </div>
           </div>
 
@@ -130,7 +173,7 @@ export function MarketingCampaigns() {
                <div className="aspect-[4/5] bg-gray-50 rounded-[1.5rem] flex items-center justify-center overflow-hidden">
                   <img src="https://images.unsplash.com/photo-1606811841689-23dfddce3e95?w=400" className="object-cover h-full w-full opacity-80" alt="Ads Preview" />
                </div>
-               <div className="mt-3 text-center text-[8px] font-black uppercase text-blue-600">Anúncio IA Gerado</div>
+               <div className="mt-3 text-center text-[8px] font-black uppercase text-blue-600 tracking-widest">Criativo Gerado por IA</div>
             </div>
           </div>
         </div>
@@ -142,34 +185,30 @@ export function MarketingCampaigns() {
           <div className="flex items-center gap-4 mb-8">
             <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl shadow-sm"><Zap size={28}/></div>
             <div>
-              <h2 className="font-black text-xl tracking-tight">Robô de Reativação</h2>
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Recall Interno</p>
+              <h2 className="font-black text-xl tracking-tight">Recall Interno</h2>
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Reativação de Pacientes</p>
             </div>
           </div>
           <div className="space-y-6">
-            <div className="flex justify-between items-center">
-              <span className="text-xs font-bold text-gray-400 uppercase">Pacientes Sumidos</span>
+            <div className="flex justify-between items-center px-2">
+              <span className="text-xs font-bold text-gray-400 uppercase">Candidatos</span>
               <span className="font-black text-2xl text-blue-600">{candidates.length}</span>
             </div>
-            <div className="p-4 bg-green-50 rounded-2xl border border-green-100 flex justify-between items-center">
-              <span className="text-[10px] font-black text-green-700 uppercase">Vagas Amanhã</span>
-              <span className="text-[10px] font-black text-green-600 border border-green-200 px-3 py-1 rounded-full bg-white">LIVRE</span>
-            </div>
-            <button className="w-full py-4 bg-gray-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-gray-200 hover:bg-black transition-all">
-              Ativar Disparo Automático
+            <button className="w-full py-4 bg-gray-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-gray-200 hover:bg-black transition-all active:scale-95">
+              Iniciar Disparos
             </button>
           </div>
         </div>
 
         <div className="lg:col-span-2 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden">
           <div className="p-8 border-b border-gray-50 bg-gray-50/30 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">
-            Lista de Reativação (Prontos para Contato)
+            Lista de Reativação Automática
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
                 <tr className="text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-50">
-                  <th className="px-8 py-5">Paciente</th>
+                  <th className="px-8 py-5">Nome do Paciente</th>
                   <th className="px-8 py-5">Última Visita</th>
                   <th className="px-8 py-5 text-right">Ação</th>
                 </tr>
@@ -178,23 +217,23 @@ export function MarketingCampaigns() {
                 {candidates.length > 0 ? candidates.map((p) => (
                   <tr key={p.id} className="hover:bg-gray-50/50 transition-colors group">
                     <td className="px-8 py-6">
-                      <div className="text-gray-800">{p.name}</div>
-                      <div className="text-[10px] text-gray-400">{p.phone}</div>
+                      <div className="text-gray-800 text-sm">{p.name}</div>
+                      <div className="text-[9px] text-gray-400 uppercase tracking-tighter">{p.phone}</div>
                     </td>
                     <td className="px-8 py-6 text-xs text-gray-400">{p.last_visit}</td>
                     <td className="px-8 py-6 text-right">
                       <button 
                         onClick={() => triggerBot(p)}
-                        className="inline-flex items-center gap-2 bg-green-50 text-green-600 px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-green-600 hover:text-white transition-all shadow-sm"
+                        className="inline-flex items-center gap-2 bg-green-50 text-green-600 px-5 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-green-600 hover:text-white transition-all shadow-sm"
                       >
-                        <MessageSquare size={14}/> Reativar no Zap
+                        <MessageSquare size={14}/> Reativar WhatsApp
                       </button>
                     </td>
                   </tr>
                 )) : (
                   <tr>
                     <td colSpan={3} className="px-8 py-16 text-center text-gray-300 uppercase text-[10px] font-black tracking-widest italic">
-                      Nenhum paciente pendente de reativação no momento.
+                      Todos os pacientes estão com as revisões em dia.
                     </td>
                   </tr>
                 )}
