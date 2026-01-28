@@ -1,5 +1,5 @@
 import eventlet
-eventlet.monkey_patch() # Deve ser a primeira linha!
+eventlet.monkey_patch() # Deve ser a primeira linha, antes de qualquer outro import
 
 import os
 from app import create_app
