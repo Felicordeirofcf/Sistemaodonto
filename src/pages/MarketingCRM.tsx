@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { 
   MoreHorizontal, Plus, Phone, X, Loader2, 
-  Facebook, Target, TrendingUp, DollarSign, RefreshCw 
+  Facebook, Target, TrendingUp, DollarSign, RefreshCw, CheckCircle2 
 } from 'lucide-react';
 
 // --- TIPAGEM DO FACEBOOK SDK ---
@@ -29,10 +29,9 @@ const COLUMNS = {
   treating: { title: 'Em Tratamento', color: 'border-purple-500', headerColor: 'text-purple-600', bg: 'bg-purple-50' }
 };
 
-// ✅ CORREÇÃO: Usando "export function" para satisfazer o App.tsx
 export function MarketingCRM() {
   
-  // --- STATES DO CRM (Kanban) ---
+  // --- STATES DO CRM ---
   const [leads, setLeads] = useState<Lead[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -41,13 +40,16 @@ export function MarketingCRM() {
   // --- STATES DA INTEGRAÇÃO FACEBOOK ---
   const [isConnected, setIsConnected] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true); // Novo state para evitar "piscar"
   const [adsStats, setAdsStats] = useState({ spend: 0.0, clicks: 0, cpc: 0.0 });
 
-  // --- 1. INICIALIZAÇÃO (FACEBOOK + LEADS) ---
+  // --- 1. INICIALIZAÇÃO E PERSISTÊNCIA ---
   useEffect(() => {
-    // A. Busca Leads do Banco
+    const token = localStorage.getItem('odonto_token');
+
+    // A. Busca Leads
     fetch('/api/marketing/leads', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('odonto_token')}` }
+        headers: { 'Authorization': `Bearer ${token}` }
     })
       .then(res => res.json())
       .then(data => { if (Array.isArray(data)) setLeads(data); })
@@ -57,7 +59,7 @@ export function MarketingCRM() {
     // B. Inicializa Facebook SDK
     window.fbAsyncInit = function() {
         window.FB.init({
-          appId      : '928590639502117', // ✅ SEU ID JÁ CONFIGURADO AQUI
+          appId      : '928590639502117',
           cookie     : true,
           xfbml      : true,
           version    : 'v19.0'
@@ -74,27 +76,41 @@ export function MarketingCRM() {
        fjs.parentNode.insertBefore(js, fjs);
     }(document, 'script', 'facebook-jssdk'));
 
-    // C. Checa se já está conectado
+    // C. CHECAGEM CRÍTICA DE PERSISTÊNCIA (Isso resolve o problema do F5)
     checkMetaConnection();
   }, []);
 
-  // --- LÓGICA DO FACEBOOK ---
+  // --- FUNÇÃO QUE MANTÉM O USUÁRIO LOGADO ---
   const checkMetaConnection = async () => {
     try {
+        const token = localStorage.getItem('odonto_token');
+        if (!token) return;
+
+        // Bate no backend para perguntar: "Tenho token salvo?"
         const res = await fetch('/api/marketing/meta/sync', {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('odonto_token')}` }
+            headers: { 'Authorization': `Bearer ${token}` }
         });
+
         if (res.ok) {
+            // Se o backend retornou 200, significa que o banco tem o token!
             const data = await res.json();
-            setIsConnected(true);
+            setIsConnected(true); // <--- FORÇA O STATUS CONECTADO
             setAdsStats({ 
                 spend: data.spend || 0, 
                 clicks: data.clicks || 0, 
                 cpc: data.cpc || 0 
             });
+        } else {
+            // Se der 400 ou 500, não está conectado
+            setIsConnected(false);
         }
-    } catch (e) { console.log("Meta não conectado"); }
+    } catch (e) { 
+        console.log("Sem conexão prévia com Meta");
+        setIsConnected(false);
+    } finally {
+        setCheckingAuth(false); // Libera a interface
+    }
   };
 
   const handleFacebookLogin = () => {
@@ -109,13 +125,12 @@ export function MarketingCRM() {
         if (response.authResponse) {
             sendTokenToBackend(response.authResponse.accessToken);
         } else {
-            console.log("Login cancelado");
             setAuthLoading(false);
         }
     }, { scope: 'ads_management,ads_read' });
   };
 
-  const sendTokenToBackend = async (token: string) => {
+  const sendTokenToBackend = async (fbToken: string) => {
     try {
         const res = await fetch('/api/marketing/meta/connect', {
             method: 'POST',
@@ -123,12 +138,13 @@ export function MarketingCRM() {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${localStorage.getItem('odonto_token')}`
             },
-            body: JSON.stringify({ accessToken: token })
+            body: JSON.stringify({ accessToken: fbToken })
         });
+
         if (res.ok) {
-            setIsConnected(true);
-            alert("✅ Conta vinculada com sucesso!");
-            checkMetaConnection();
+            setIsConnected(true); // Atualiza na hora
+            alert("✅ Conta vinculada e salva com sucesso!");
+            checkMetaConnection(); // Puxa os dados reais
         } else {
             throw new Error("Falha ao salvar token");
         }
@@ -139,7 +155,7 @@ export function MarketingCRM() {
     }
   };
 
-  // --- LÓGICA DO CRM (KANBAN) ---
+  // --- LÓGICA DO KANBAN ---
   const handleCreateLead = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -166,7 +182,6 @@ export function MarketingCRM() {
     const newStatus = destination.droppableId;
     const leadId = parseInt(draggableId);
     
-    // Atualização Otimista (Visual)
     const oldLeads = [...leads];
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
 
@@ -179,7 +194,7 @@ export function MarketingCRM() {
         },
         body: JSON.stringify({ status: newStatus })
       });
-    } catch (error) { setLeads(oldLeads); } // Reverte se der erro
+    } catch (error) { setLeads(oldLeads); }
   };
 
   const getColumnLeads = (status: string) => leads.filter(l => l.status === status);
@@ -189,7 +204,7 @@ export function MarketingCRM() {
   return (
     <div className="p-8 w-full h-screen overflow-hidden flex flex-col bg-gray-50 relative font-sans">
       
-      {/* HEADER + TÍTULO */}
+      {/* HEADER */}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 flex-shrink-0">
         <div>
           <h1 className="text-3xl font-black text-gray-900 tracking-tight">Funil de Vendas & Ads</h1>
@@ -200,10 +215,12 @@ export function MarketingCRM() {
         </button>
       </header>
 
-      {/* --- WIDGET DE INTEGRAÇÃO FACEBOOK (HEADER) --- */}
+      {/* --- WIDGET FACEBOOK --- */}
       <div className="mb-6 flex-shrink-0">
-        {!isConnected ? (
-            // ESTADO 1: NÃO CONECTADO
+        {checkingAuth ? (
+             <div className="h-24 bg-gray-100 rounded-3xl animate-pulse w-full"></div>
+        ) : !isConnected ? (
+            // NÃO CONECTADO
             <div className="bg-white p-4 rounded-3xl border border-gray-200 shadow-sm flex items-center justify-between">
                 <div className="flex items-center gap-4">
                     <div className="bg-blue-100 p-3 rounded-2xl text-blue-600"><Target size={24} /></div>
@@ -222,8 +239,8 @@ export function MarketingCRM() {
                 </button>
             </div>
         ) : (
-            // ESTADO 2: CONECTADO (DASHBOARD ADS)
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            // CONECTADO (DASHBOARD)
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
                 <div className="bg-white p-4 rounded-3xl border border-blue-100 shadow-sm flex flex-col justify-between relative overflow-hidden group">
                     <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:scale-110 transition-transform"><Target size={40} /></div>
                     <span className="text-[10px] font-black uppercase text-gray-400 tracking-widest">Investimento</span>
@@ -233,7 +250,7 @@ export function MarketingCRM() {
                 </div>
                 <div className="bg-white p-4 rounded-3xl border border-purple-100 shadow-sm flex flex-col justify-between relative overflow-hidden group">
                     <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:scale-110 transition-transform"><TrendingUp size={40} /></div>
-                    <span className="text-[10px] font-black uppercase text-gray-400 tracking-widest">Cliques no Anúncio</span>
+                    <span className="text-[10px] font-black uppercase text-gray-400 tracking-widest">Cliques</span>
                     <div className="flex items-center gap-2 text-2xl font-black text-gray-800">
                         {adsStats.clicks}
                     </div>
@@ -245,17 +262,18 @@ export function MarketingCRM() {
                         R$ {adsStats.cpc.toFixed(2)}
                     </div>
                 </div>
-                <div className="bg-gradient-to-br from-green-500 to-emerald-600 p-4 rounded-3xl shadow-lg shadow-green-200 flex flex-col justify-center items-center text-white cursor-pointer hover:shadow-xl transition-all" onClick={checkMetaConnection}>
-                    <RefreshCw size={24} className="mb-2 opacity-80" />
-                    <span className="text-[10px] font-black uppercase tracking-widest opacity-80">Sincronizar</span>
-                    <span className="font-bold text-sm">Atualizar Dados</span>
+                <div className="bg-green-500 hover:bg-green-600 text-white p-4 rounded-3xl shadow-lg shadow-green-200 flex flex-col justify-center items-center cursor-pointer transition-all active:scale-95" onClick={checkMetaConnection}>
+                    {authLoading ? <Loader2 className="animate-spin mb-1" /> : <RefreshCw size={24} className="mb-1" />}
+                    <span className="text-[10px] font-black uppercase tracking-widest opacity-90">Sincronizar</span>
+                    <div className="flex items-center gap-1">
+                        <CheckCircle2 size={14} />
+                        <span className="font-bold text-xs">Ativo</span>
+                    </div>
                 </div>
             </div>
         )}
       </div>
 
-      {/* --- KANBAN BOARD (CORPO DA PÁGINA) --- */}
-      
       {/* MODAL NOVO LEAD */}
       {isModalOpen && (
           <div className="fixed inset-0 z-[100] bg-slate-900/60 flex items-center justify-center backdrop-blur-sm p-4">
@@ -290,7 +308,7 @@ export function MarketingCRM() {
           </div>
       )}
 
-      {/* ÁREA DE ARRASTAR E SOLTAR */}
+      {/* KANBAN */}
       <DragDropContext onDragEnd={onDragEnd}>
         <div className="flex-1 overflow-x-auto overflow-y-hidden pb-4">
           <div className="flex gap-6 h-full min-w-[1200px]">

@@ -52,14 +52,13 @@ def move_lead(id):
     return jsonify({'message': 'Lead movido com sucesso!'}), 200
 
 
-# --- 2. INTEGRAÇÃO REAL COM META ADS (FACEBOOK/INSTAGRAM) ---
+# --- 2. INTEGRAÇÃO REAL COM META ADS (CORRIGIDA PARA AUTO-DESCOBERTA) ---
 
 @marketing_bp.route('/marketing/meta/connect', methods=['POST'])
 @jwt_required()
 def connect_meta_real():
     """
-    Recebe o token curto do Frontend (Login with Facebook),
-    troca por um token de longa duração (60 dias) e salva no banco.
+    Recebe o token, troca por Long-Lived e DESCOBRE o ID da conta de anúncios automaticamente.
     """
     try:
         user = User.query.get(get_jwt_identity())
@@ -67,15 +66,15 @@ def connect_meta_real():
         data = request.get_json()
         
         short_lived_token = data.get('accessToken')
-        ad_account_id = data.get('adAccountId') # O ID da conta de anúncios selecionada no front
         
         if not short_lived_token:
             return jsonify({'error': 'Token de acesso não fornecido'}), 400
 
-        # 1. Troca por Token de Longa Duração (Server-Side)
+        # 1. Troca por Token de Longa Duração
         app_id = os.environ.get('META_APP_ID')
         app_secret = os.environ.get('META_APP_SECRET')
-        
+        long_lived_token = short_lived_token
+
         if app_id and app_secret:
             url = "https://graph.facebook.com/v19.0/oauth/access_token"
             params = {
@@ -87,21 +86,42 @@ def connect_meta_real():
             resp = requests.get(url, params=params)
             if resp.status_code == 200:
                 long_lived_token = resp.json().get('access_token')
-            else:
-                # Fallback se as vars de ambiente não estiverem configuradas ou der erro
-                long_lived_token = short_lived_token 
-        else:
-            long_lived_token = short_lived_token
 
-        # 2. Salva na Clínica
+        # 2. AUTO-DESCOBERTA DO ID DA CONTA DE ANÚNCIOS (O Pulo do Gato)
+        # Se o front não mandou o ID, vamos perguntar pro Facebook quais contas o usuário tem
+        ad_account_id = data.get('adAccountId')
+        
+        if not ad_account_id:
+            try:
+                me_url = "https://graph.facebook.com/v19.0/me/adaccounts"
+                me_params = {
+                    'access_token': long_lived_token,
+                    'fields': 'account_id,name'
+                }
+                me_resp = requests.get(me_url, params=me_params)
+                
+                if me_resp.status_code == 200:
+                    accounts_data = me_resp.json().get('data', [])
+                    if accounts_data:
+                        # Pega a primeira conta de anúncios encontrada
+                        ad_account_id = accounts_data[0].get('account_id')
+                        print(f"Conta de Anúncios encontrada: {ad_account_id}")
+            except Exception as e:
+                print(f"Erro ao buscar ad accounts: {e}")
+
+        # 3. Salva na Clínica
         clinic.meta_access_token = long_lived_token
         if ad_account_id:
-            clinic.meta_ad_account_id = ad_account_id
+            # Garante que salva só o número ou com act_ se preferir, aqui salvamos limpo
+            clinic.meta_ad_account_id = str(ad_account_id).replace('act_', '')
             
         clinic.last_sync_at = datetime.utcnow()
         db.session.commit()
 
-        return jsonify({'message': 'Conexão com Meta Ads estabelecida com sucesso!', 'token_type': 'long-lived'}), 200
+        if not ad_account_id:
+            return jsonify({'message': 'Facebook conectado, mas nenhuma conta de anúncios foi encontrada. Crie uma no Gerenciador de Anúncios.', 'token_type': 'long-lived'}), 200
+
+        return jsonify({'message': 'Conexão com Meta Ads estabelecida!', 'ad_account_id': ad_account_id}), 200
 
     except Exception as e:
         db.session.rollback()
@@ -111,72 +131,62 @@ def connect_meta_real():
 @marketing_bp.route('/marketing/meta/sync', methods=['POST'])
 @jwt_required()
 def sync_meta_real():
-    """
-    Puxa dados REAIS de gastos, cliques e impressões do Facebook Graph API
-    """
     try:
         user = User.query.get(get_jwt_identity())
         clinic = Clinic.query.get(user.clinic_id)
 
-        if not clinic.meta_access_token or not clinic.meta_ad_account_id:
-            return jsonify({'error': 'Conta de anúncios não conectada. Faça login novamente.'}), 400
+        # Verificação robusta
+        if not clinic.meta_access_token:
+            return jsonify({'error': 'Token não encontrado. Faça login novamente.'}), 400
+            
+        if not clinic.meta_ad_account_id:
+            # Tenta recuperar o ID de novo se tiver token mas não tiver ID
+            return jsonify({'error': 'ID da conta de anúncios não configurado. Refaça a conexão.'}), 400
 
         # 1. Configura a chamada para a Graph API
-        ad_account_id = clinic.meta_ad_account_id.replace('act_', '') # Garante formato limpo
+        ad_account_id = clinic.meta_ad_account_id
         url = f"https://graph.facebook.com/v19.0/act_{ad_account_id}/insights"
         
         params = {
             'access_token': clinic.meta_access_token,
-            'date_preset': 'maximum', # Pega todo o histórico
-            'fields': 'spend,clicks,cpc,cpm,impressions,actions,conversions',
+            'date_preset': 'maximum',
+            'fields': 'spend,clicks,cpc,cpm,impressions,actions',
             'level': 'account'
         }
 
-        # 2. Faz a requisição Real
         response = requests.get(url, params=params)
         
+        # Tratamento de erro específico do Token Expirado
+        if response.status_code == 401:
+             return jsonify({'error': 'Token expirado ou inválido do Facebook'}), 401
+
         if response.status_code != 200:
             error_data = response.json()
-            return jsonify({'error': 'Erro no Facebook API', 'details': error_data}), response.status_code
+            return jsonify({'error': 'Erro no Facebook API', 'details': error_data}), 400
 
         data = response.json().get('data', [])
         
-        if not data:
-            return jsonify({'message': 'Nenhum dado encontrado na conta de anúncios.'}), 200
+        # Se não tiver dados (conta nova sem gastos), retornamos zeros em vez de erro
+        spend = 0.0
+        clicks = 0
+        cpc = 0.0
 
-        # 3. Processa os dados reais
-        stats = data[0] # Pega o resumo da conta
+        if data:
+            stats = data[0]
+            spend = float(stats.get('spend', 0.0))
+            clicks = int(stats.get('clicks', 0))
+            cpc = float(stats.get('cpc', 0.0))
         
-        # Atualiza ou cria a campanha de "Resumo Geral"
-        campaign = MarketingCampaign.query.filter_by(clinic_id=clinic.id, name="Resumo Meta Ads").first()
-        
-        if not campaign:
-            campaign = MarketingCampaign(
-                clinic_id=clinic.id,
-                name="Resumo Meta Ads",
-                status='active',
-                budget=0.0 # Orçamento é definido no gerenciador de anúncios
-            )
-            db.session.add(campaign)
-
-        # Atualiza com dados reais
-        campaign.clicks = int(stats.get('clicks', 0))
-        campaign.impressions = int(stats.get('impressions', 0))
-        campaign.cost_per_click = float(stats.get('cpc', 0.0))
-        campaign.conversions = 0 # Facebook retorna 'actions' complexas, simplificando aqui
-        
-        # Atualiza o saldo gasto na clínica
-        spend = float(stats.get('spend', 0.0))
-        clinic.current_ad_balance = spend # Ou lógica de saldo pré-pago
+        # Atualiza banco
+        clinic.current_ad_balance = spend
         clinic.last_sync_at = datetime.utcnow()
-
         db.session.commit()
 
         return jsonify({
             'message': 'Sincronização Real Finalizada',
             'spend': spend,
-            'clicks': campaign.clicks,
-            'cpc': campaign.cpc
+            'clicks': clicks,
+            'cpc': cpc
         }), 200
 
     except Exception as e:
