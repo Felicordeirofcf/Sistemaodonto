@@ -37,6 +37,22 @@ def create_app():
     migrate.init_app(app, db)
     jwt.init_app(app)
 
+    # --- BLOCO DE CORREÇÃO AUTOMÁTICA (PARA RENDER FREE) ---
+    with app.app_context():
+        from sqlalchemy import text
+        try:
+            logger.info("🔍 Verificando integridade das tabelas...")
+            # Tenta adicionar a coluna is_active na tabela users caso ela não exista
+            db.session.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;'))
+            # Tenta adicionar a coluna is_active na tabela clinics caso ela não exista (visto no seu models)
+            db.session.execute(text('ALTER TABLE clinics ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;'))
+            db.session.commit()
+            logger.info("✅ Colunas de segurança (is_active) verificadas/criadas.")
+        except Exception as e:
+            db.session.rollback()
+            logger.warning(f"⚠️ Nota sobre sincronização: {e}")
+    # -------------------------------------------------------
+
     from .models import Clinic, User, Patient, InventoryItem, Lead, Appointment, Transaction, Procedure, MarketingCampaign
 
     # --- REGISTRO DE BLUEPRINTS ---
@@ -70,7 +86,7 @@ def create_app():
     from .routes.procedure_routes import procedure_bp
     app.register_blueprint(procedure_bp, url_prefix='/api')
 
-    # --- ROTAS DE UTILIDADE (REVISADAS PARA EVITAR TIMEOUT) ---
+    # --- ROTAS DE UTILIDADE ---
 
     @app.route('/api/force_reset_db')
     def force_reset():
@@ -82,18 +98,13 @@ def create_app():
         try:
             logger.info("Iniciando Reset Total do Banco...")
             db.session.remove()
-            
-            logger.info("Executando drop_all (Limpando tabelas antigas)...")
             db.drop_all()
-            
-            logger.info("Executando create_all (Criando novas colunas)...")
             db.create_all()
-            
             logger.info("✅ Banco resetado com sucesso!")
             return "✅ BANCO RESETADO COM SUCESSO! Prossiga para /api/seed_db_web", 200
         except Exception as e:
             logger.error(f"❌ Erro Crítico no Reset: {str(e)}")
-            return f"Erro no servidor: Verifique os Logs do Render. Detalhe: {str(e)}", 500
+            return f"Erro no servidor: {str(e)}", 500
 
     @app.route('/api/seed_db_web')
     def seed_db_web():
@@ -124,7 +135,6 @@ def create_app():
                 )
                 db.session.add(admin)
 
-                # Paciente configurado para ativar o Recall IA
                 eight_months_ago = datetime.utcnow() - timedelta(days=240)
                 p1 = Patient(
                     name="Carlos Eduardo", 
