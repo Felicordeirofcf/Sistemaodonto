@@ -3,7 +3,7 @@ import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-p
 import { 
   MoreHorizontal, Plus, Phone, X, Loader2, 
   Facebook, Target, TrendingUp, DollarSign, RefreshCw, CheckCircle2,
-  Instagram, Wand2, Copy, Image as ImageIcon, AlertTriangle, Layout
+  Instagram, Wand2, Copy, Image as ImageIcon, AlertTriangle, LogOut
 } from 'lucide-react';
 
 declare global {
@@ -26,7 +26,7 @@ const COLUMNS = {
 export function MarketingCRM() {
   
   const [activeTab, setActiveTab] = useState<'funnel' | 'creative'>('funnel');
-  const [mediaSource, setMediaSource] = useState<'instagram' | 'facebook'>('instagram'); // Novo seletor
+  const [mediaSource, setMediaSource] = useState<'instagram' | 'facebook'>('instagram');
   const [leads, setLeads] = useState<Lead[]>([]);
   const [mediaList, setMediaList] = useState<IgMedia[]>([]);
   const [selectedMedia, setSelectedMedia] = useState<IgMedia | null>(null);
@@ -91,7 +91,7 @@ export function MarketingCRM() {
     window.FB.login((response: any) => {
         if (response.authResponse) sendTokenToBackend(response.authResponse.accessToken);
         else setAuthLoading(false);
-    }, { scope: 'ads_management,ads_read,leads_retrieval,instagram_basic,pages_show_list,pages_read_engagement' }); // Adicionado escopos
+    }, { scope: 'ads_management,ads_read,leads_retrieval,instagram_basic,pages_show_list,pages_read_engagement' });
   };
 
   const sendTokenToBackend = async (fbToken: string) => {
@@ -103,10 +103,29 @@ export function MarketingCRM() {
         });
         if (res.ok) { 
             setIsConnected(true); 
-            alert("Redes Sociais Conectadas!");
+            alert("Conectado com Sucesso!");
             checkMetaConnection(); 
         }
     } catch (error) { alert("Erro ao conectar."); } finally { setAuthLoading(false); }
+  };
+
+  // --- NOVA FUNÇÃO: DESCONECTAR ---
+  const handleDisconnect = async () => {
+    if (!window.confirm("Deseja realmente desconectar a conta do Facebook/Instagram?")) return;
+    setAuthLoading(true);
+    try {
+        const res = await fetch('/api/marketing/meta/disconnect', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('odonto_token')}` }
+        });
+        if (res.ok) {
+            setIsConnected(false);
+            setAdsStats({ spend: 0.0, clicks: 0, cpc: 0.0 });
+            setMediaList([]);
+            alert("Desconectado com sucesso.");
+        }
+    } catch (e) { alert("Erro ao desconectar."); }
+    finally { setAuthLoading(false); }
   };
 
   const fetchMedia = async (source: 'instagram' | 'facebook') => {
@@ -218,12 +237,24 @@ export function MarketingCRM() {
                         <Facebook size={20} /> {authLoading ? 'Conectando...' : 'Vincular Facebook & Instagram'}
                     </button>
                 ) : (
-                    <div className="grid grid-cols-3 gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
-                        <div className="bg-white p-4 rounded-2xl border border-blue-100 shadow-sm"><span className="text-[10px] uppercase text-gray-400 font-black">Investimento</span><div className="text-2xl font-black text-gray-800">R$ {adsStats.spend.toFixed(2)}</div></div>
-                        <div className="bg-white p-4 rounded-2xl border border-purple-100 shadow-sm"><span className="text-[10px] uppercase text-gray-400 font-black">Cliques</span><div className="text-2xl font-black text-gray-800">{adsStats.clicks}</div></div>
-                        <div className="bg-green-500 text-white p-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 font-bold cursor-pointer hover:bg-green-600 active:scale-95 transition-all" onClick={checkMetaConnection}>
-                            <RefreshCw size={18} /> Sincronizar Tudo
+                    <div className="flex justify-between items-start gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
+                        {/* STATS */}
+                        <div className="grid grid-cols-3 gap-4 flex-1">
+                            <div className="bg-white p-4 rounded-2xl border border-blue-100 shadow-sm"><span className="text-[10px] uppercase text-gray-400 font-black">Investimento</span><div className="text-2xl font-black text-gray-800">R$ {adsStats.spend.toFixed(2)}</div></div>
+                            <div className="bg-white p-4 rounded-2xl border border-purple-100 shadow-sm"><span className="text-[10px] uppercase text-gray-400 font-black">Cliques</span><div className="text-2xl font-black text-gray-800">{adsStats.clicks}</div></div>
+                            <div className="bg-green-500 text-white p-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 font-bold cursor-pointer hover:bg-green-600 active:scale-95 transition-all" onClick={checkMetaConnection}>
+                                <RefreshCw size={18} /> Sincronizar Tudo
+                            </div>
                         </div>
+                        
+                        {/* BOTÃO DESCONECTAR (NOVO) */}
+                        <button 
+                            onClick={handleDisconnect} 
+                            disabled={authLoading}
+                            className="bg-red-50 text-red-600 border border-red-200 p-4 rounded-2xl shadow-sm flex items-center justify-center gap-2 font-bold cursor-pointer hover:bg-red-100 active:scale-95 transition-all h-full"
+                        >
+                            <LogOut size={18} />
+                        </button>
                     </div>
                 )}
             </div>

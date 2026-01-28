@@ -119,7 +119,6 @@ def sync_meta_real():
         
         response = requests.get(url_stats, params=params_stats)
         
-        # SE DER ERRO NO FACEBOOK, NÃO ZERAMOS OS DADOS LOCAIS!
         if response.status_code != 200:
             return jsonify({'error': 'Erro ao conectar no Facebook Ads', 'details': response.json()}), response.status_code
 
@@ -138,6 +137,23 @@ def sync_meta_real():
         
         return jsonify({'message': 'Sync OK (Sem dados)', 'spend': 0.0, 'clicks': 0, 'cpc': 0.0}), 200
 
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# --- NOVO: ROTA DE DESCONEXÃO (LOGOUT) ---
+@marketing_bp.route('/marketing/meta/disconnect', methods=['POST'])
+@jwt_required()
+def disconnect_meta():
+    try:
+        user = User.query.get(get_jwt_identity())
+        clinic = Clinic.query.get(user.clinic_id)
+        
+        # Remove os tokens e IDs salvos
+        clinic.meta_access_token = None
+        clinic.meta_ad_account_id = None
+        db.session.commit()
+        
+        return jsonify({'message': 'Desconectado com sucesso!'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -181,9 +197,6 @@ def get_instagram_media():
 @marketing_bp.route('/marketing/facebook/media', methods=['GET'])
 @jwt_required()
 def get_facebook_media():
-    """
-    NOVA ROTA: Busca posts da Página do Facebook
-    """
     try:
         user = User.query.get(get_jwt_identity())
         clinic = Clinic.query.get(user.clinic_id)
@@ -193,39 +206,40 @@ def get_facebook_media():
 
         # Busca a primeira página administrada pelo usuário
         url_pages = "https://graph.facebook.com/v19.0/me/accounts"
-        params = {'access_token': clinic.meta_access_token, 'fields': 'id,name'}
+        params = {'access_token': clinic.meta_access_token, 'fields': 'id,name,access_token'}
         resp = requests.get(url_pages, params=params)
         data = resp.json().get('data', [])
 
         if not data:
             return jsonify({'error': 'Nenhuma página do Facebook encontrada.'}), 404
             
-        page_id = data[0]['id'] # Pega a primeira página
+        # Tenta buscar posts de todas as páginas
+        all_posts = []
+        for page in data:
+            page_id = page['id']
+            page_token = page.get('access_token', clinic.meta_access_token)
 
-        # Busca posts da página (feed)
-        url_posts = f"https://graph.facebook.com/v19.0/{page_id}/posts"
-        params_posts = {
-            'access_token': clinic.meta_access_token,
-            'fields': 'id,message,full_picture,created_time,permalink_url',
-            'limit': 15
-        }
-        resp_posts = requests.get(url_posts, params=params_posts)
+            url_posts = f"https://graph.facebook.com/v19.0/{page_id}/posts"
+            params_posts = {
+                'access_token': page_token,
+                'fields': 'id,message,full_picture,created_time,permalink_url',
+                'limit': 5
+            }
+            resp_posts = requests.get(url_posts, params=params_posts)
+            fb_data = resp_posts.json().get('data', [])
+            
+            for post in fb_data:
+                if 'full_picture' in post:
+                    all_posts.append({
+                        'id': post['id'],
+                        'media_url': post['full_picture'],
+                        'thumbnail_url': post['full_picture'],
+                        'caption': post.get('message', ''),
+                        'media_type': 'IMAGE',
+                        'permalink': post.get('permalink_url', '')
+                    })
         
-        # Formata para ficar igual ao objeto do Instagram no front
-        fb_data = resp_posts.json().get('data', [])
-        formatted_data = []
-        for post in fb_data:
-            if 'full_picture' in post: # Só traz posts que tem imagem
-                formatted_data.append({
-                    'id': post['id'],
-                    'media_url': post['full_picture'],
-                    'thumbnail_url': post['full_picture'],
-                    'caption': post.get('message', ''),
-                    'media_type': 'IMAGE',
-                    'permalink': post.get('permalink_url', '')
-                })
-
-        return jsonify(formatted_data), 200
+        return jsonify(all_posts[:15]), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
