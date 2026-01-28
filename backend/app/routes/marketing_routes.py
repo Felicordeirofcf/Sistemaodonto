@@ -4,6 +4,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime, timedelta
 import requests
 import os
+import random  # Necessário para a simulação da IA
 
 marketing_bp = Blueprint('marketing', __name__)
 
@@ -177,17 +178,16 @@ def sync_meta_real():
         
         camp.clicks = clicks
         camp.cost_per_click = cpc
-        camp.budget = spend # Atualiza com o gasto real
+        camp.budget = spend
         
         # --- PARTE B: IMPORTAÇÃO AUTOMÁTICA DE LEADS ---
         new_leads_count = 0
         try:
-            # Busca anúncios que tenham leads associados
             url_leads = f"https://graph.facebook.com/v19.0/act_{ad_account_id}/ads"
             params_leads = {
                 'access_token': clinic.meta_access_token,
                 'fields': 'name,leads{created_time,field_data}',
-                'limit': 50 # Pega os 50 anúncios mais recentes
+                'limit': 50
             }
             
             resp_leads = requests.get(url_leads, params=params_leads)
@@ -195,11 +195,8 @@ def sync_meta_real():
             
             for ad in ads_list:
                 if 'leads' in ad:
-                    # O Facebook retorna os leads dentro de cada anúncio
                     fb_leads = ad['leads']['data']
-                    
                     for fb_lead in fb_leads:
-                        # Processa os campos (Nome, Telefone, Email)
                         field_data = fb_lead.get('field_data', [])
                         lead_info = {'name': 'Paciente do Facebook', 'phone': '', 'email': ''}
                         
@@ -208,7 +205,6 @@ def sync_meta_real():
                             if 'phone' in field['name']: lead_info['phone'] = field['values'][0]
                             if 'email' in field['name']: lead_info['email'] = field['values'][0]
                         
-                        # Verifica se já existe esse lead na clínica (evita duplicar)
                         exists = Lead.query.filter_by(
                             clinic_id=clinic.id, 
                             name=lead_info['name']
@@ -228,7 +224,7 @@ def sync_meta_real():
                             new_leads_count += 1
                             
         except Exception as e:
-            print(f"Erro ao importar leads (pode ser falta de permissão): {e}")
+            print(f"Erro ao importar leads: {e}")
 
         db.session.commit()
 
@@ -245,7 +241,83 @@ def sync_meta_real():
         return jsonify({'error': f"Erro interno: {str(e)}"}), 500
 
 
-# --- 3. REATIVAÇÃO (MANTIDO IGUAL) ---
+# --- 3. NOVA FUNCIONALIDADE: INSTAGRAM & IA COPYWRITING ---
+
+@marketing_bp.route('/marketing/instagram/media', methods=['GET'])
+@jwt_required()
+def get_instagram_media():
+    """
+    Busca os últimos posts do Instagram Business do cliente
+    """
+    try:
+        user = User.query.get(get_jwt_identity())
+        clinic = Clinic.query.get(user.clinic_id)
+
+        if not clinic.meta_access_token:
+            return jsonify({'error': 'Instagram não conectado.'}), 400
+
+        # 1. Achar o ID do Instagram vinculado à Página
+        url_pages = "https://graph.facebook.com/v19.0/me/accounts"
+        params_pages = {
+            'access_token': clinic.meta_access_token,
+            'fields': 'instagram_business_account{id},name,access_token'
+        }
+        resp_pages = requests.get(url_pages, params=params_pages)
+        data_pages = resp_pages.json().get('data', [])
+
+        ig_user_id = None
+        
+        for page in data_pages:
+            if 'instagram_business_account' in page:
+                ig_user_id = page['instagram_business_account']['id']
+                break
+        
+        if not ig_user_id:
+            return jsonify({'error': 'Nenhuma conta de Instagram Business encontrada vinculada à página.'}), 404
+
+        # 2. Buscar mídias
+        url_media = f"https://graph.facebook.com/v19.0/{ig_user_id}/media"
+        params_media = {
+            'access_token': clinic.meta_access_token,
+            'fields': 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp',
+            'limit': 12
+        }
+        resp_media = requests.get(url_media, params=params_media)
+        media_items = resp_media.json().get('data', [])
+
+        return jsonify(media_items), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@marketing_bp.route('/marketing/ai/generate', methods=['POST'])
+@jwt_required()
+def generate_copy_ai():
+    """
+    Simula uma IA de Copywriting para gerar legendas vendedoras
+    """
+    try:
+        data = request.get_json()
+        original_caption = data.get('caption', '')
+        
+        # Templates de Copywriting (Simulação de IA)
+        prompts = [
+            f"🚀 Transforme seu sorriso hoje! {original_caption}... Agende sua avaliação agora clicando no link da bio! 🦷✨",
+            f"💡 Você sabia? {original_caption}. Cuide da sua saúde bucal com quem entende. Responda 'EU QUERO' para saber mais!",
+            f"⚠️ Atenção: {original_caption}. Não deixe para depois o que pode custar seu dente amanhã. Vagas limitadas para essa semana!",
+            f"✨ O sorriso dos seus sonhos está perto. {original_caption}. Tecnologia e conforto esperando por você aqui na clínica."
+        ]
+        
+        ai_suggestion = random.choice(prompts)
+
+        return jsonify({'suggestion': ai_suggestion}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# --- 4. REATIVAÇÃO (MANTIDO IGUAL) ---
 
 @marketing_bp.route('/marketing/campaign/recall', methods=['GET'])
 @jwt_required()
@@ -284,7 +356,8 @@ def get_recall_campaign():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# --- 4. ROTA DE CRESCIMENTO ---
+
+# --- 5. ROTA DE CRESCIMENTO ---
 @marketing_bp.route('/marketing/campaign/activate', methods=['POST'])
 @jwt_required()
 def activate_ads():
