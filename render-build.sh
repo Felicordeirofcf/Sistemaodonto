@@ -2,27 +2,26 @@
 # exit on error
 set -o errexit
 
-echo "🚀 Iniciando processo de Build..."
+echo "🚀 Iniciando processo de Build Industrial..."
 
 # 1. Instalar dependências do Backend (Python)
 echo "🐍 Instalando dependências do Python..."
+pip install --upgrade pip
 pip install -r backend/requirements.txt
 
 # 2. Instalar dependências do Frontend (Node) e Buildar
-echo "📦 Instalando e buildando o Frontend..."
+echo "📦 Instalando e buildando o Frontend (Vite/React)..."
 npm install
 npm run build
 
 # 3. Organizar os arquivos estáticos para o Flask
-# Criamos a pasta static dentro de backend/app se não existir
-echo "🚚 Movendo arquivos para o diretório static..."
+echo "🚚 Limpando e movendo build para o diretório static..."
 mkdir -p backend/app/static
 
-# Limpamos o conteúdo antigo da pasta static, mas SEM deletar a pasta em si
-# Isso evita erros de permissão e garante que o auto_migrate.py continue lá
-rm -rf backend/app/static/*
+# Limpeza seletiva para evitar problemas de concorrência no Render
+find backend/app/static -mindepth 1 -delete
 
-# Copia o build do React para a pasta static do Flask
+# Copia o build final
 cp -r dist/* backend/app/static/
 
-echo "✅ Build finalizado com sucesso!"
+echo "✅ Build finalizado com sucesso! Pronto para o deploy."
