@@ -40,7 +40,7 @@ export function MarketingCRM() {
   // --- STATES DA INTEGRAÇÃO FACEBOOK ---
   const [isConnected, setIsConnected] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
-  const [checkingAuth, setCheckingAuth] = useState(true); // Novo state para evitar "piscar"
+  const [checkingAuth, setCheckingAuth] = useState(true); 
   const [adsStats, setAdsStats] = useState({ spend: 0.0, clicks: 0, cpc: 0.0 });
 
   // --- 1. INICIALIZAÇÃO E PERSISTÊNCIA ---
@@ -76,7 +76,7 @@ export function MarketingCRM() {
        fjs.parentNode.insertBefore(js, fjs);
     }(document, 'script', 'facebook-jssdk'));
 
-    // C. CHECAGEM CRÍTICA DE PERSISTÊNCIA (Isso resolve o problema do F5)
+    // C. CHECAGEM CRÍTICA DE PERSISTÊNCIA
     checkMetaConnection();
   }, []);
 
@@ -86,30 +86,27 @@ export function MarketingCRM() {
         const token = localStorage.getItem('odonto_token');
         if (!token) return;
 
-        // Bate no backend para perguntar: "Tenho token salvo?"
         const res = await fetch('/api/marketing/meta/sync', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` }
         });
 
         if (res.ok) {
-            // Se o backend retornou 200, significa que o banco tem o token!
             const data = await res.json();
-            setIsConnected(true); // <--- FORÇA O STATUS CONECTADO
+            setIsConnected(true); 
             setAdsStats({ 
                 spend: data.spend || 0, 
                 clicks: data.clicks || 0, 
                 cpc: data.cpc || 0 
             });
         } else {
-            // Se der 400 ou 500, não está conectado
             setIsConnected(false);
         }
     } catch (e) { 
         console.log("Sem conexão prévia com Meta");
         setIsConnected(false);
     } finally {
-        setCheckingAuth(false); // Libera a interface
+        setCheckingAuth(false);
     }
   };
 
@@ -127,7 +124,8 @@ export function MarketingCRM() {
         } else {
             setAuthLoading(false);
         }
-    }, { scope: 'ads_management,ads_read' });
+    // ✅ ATUALIZADO: Adicionado 'leads_retrieval' para puxar cadastros do Ads
+    }, { scope: 'ads_management,ads_read,leads_retrieval' });
   };
 
   const sendTokenToBackend = async (fbToken: string) => {
@@ -142,9 +140,9 @@ export function MarketingCRM() {
         });
 
         if (res.ok) {
-            setIsConnected(true); // Atualiza na hora
+            setIsConnected(true); 
             alert("✅ Conta vinculada e salva com sucesso!");
-            checkMetaConnection(); // Puxa os dados reais
+            checkMetaConnection(); 
         } else {
             throw new Error("Falha ao salvar token");
         }

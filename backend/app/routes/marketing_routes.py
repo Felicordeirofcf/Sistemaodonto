@@ -52,7 +52,7 @@ def move_lead(id):
     return jsonify({'message': 'Lead movido com sucesso!'}), 200
 
 
-# --- 2. INTEGRAÇÃO REAL COM META ADS (CORRIGIDA PARA AUTO-DESCOBERTA) ---
+# --- 2. INTEGRAÇÃO REAL COM META ADS ---
 
 @marketing_bp.route('/marketing/meta/connect', methods=['POST'])
 @jwt_required()
@@ -87,8 +87,7 @@ def connect_meta_real():
             if resp.status_code == 200:
                 long_lived_token = resp.json().get('access_token')
 
-        # 2. AUTO-DESCOBERTA DO ID DA CONTA DE ANÚNCIOS (O Pulo do Gato)
-        # Se o front não mandou o ID, vamos perguntar pro Facebook quais contas o usuário tem
+        # 2. AUTO-DESCOBERTA DO ID DA CONTA DE ANÚNCIOS
         ad_account_id = data.get('adAccountId')
         
         if not ad_account_id:
@@ -103,23 +102,20 @@ def connect_meta_real():
                 if me_resp.status_code == 200:
                     accounts_data = me_resp.json().get('data', [])
                     if accounts_data:
-                        # Pega a primeira conta de anúncios encontrada
                         ad_account_id = accounts_data[0].get('account_id')
-                        print(f"Conta de Anúncios encontrada: {ad_account_id}")
             except Exception as e:
                 print(f"Erro ao buscar ad accounts: {e}")
 
         # 3. Salva na Clínica
         clinic.meta_access_token = long_lived_token
         if ad_account_id:
-            # Garante que salva só o número ou com act_ se preferir, aqui salvamos limpo
             clinic.meta_ad_account_id = str(ad_account_id).replace('act_', '')
             
         clinic.last_sync_at = datetime.utcnow()
         db.session.commit()
 
         if not ad_account_id:
-            return jsonify({'message': 'Facebook conectado, mas nenhuma conta de anúncios foi encontrada. Crie uma no Gerenciador de Anúncios.', 'token_type': 'long-lived'}), 200
+            return jsonify({'message': 'Conectado, mas nenhuma conta de anúncios encontrada.', 'token_type': 'long-lived'}), 200
 
         return jsonify({'message': 'Conexão com Meta Ads estabelecida!', 'ad_account_id': ad_account_id}), 200
 
@@ -131,62 +127,117 @@ def connect_meta_real():
 @marketing_bp.route('/marketing/meta/sync', methods=['POST'])
 @jwt_required()
 def sync_meta_real():
+    """
+    Sincroniza GASTOS (Insights) e LEADS (Formulários) do Facebook.
+    """
     try:
         user = User.query.get(get_jwt_identity())
         clinic = Clinic.query.get(user.clinic_id)
 
-        # Verificação robusta
-        if not clinic.meta_access_token:
-            return jsonify({'error': 'Token não encontrado. Faça login novamente.'}), 400
-            
-        if not clinic.meta_ad_account_id:
-            # Tenta recuperar o ID de novo se tiver token mas não tiver ID
-            return jsonify({'error': 'ID da conta de anúncios não configurado. Refaça a conexão.'}), 400
+        if not clinic.meta_access_token or not clinic.meta_ad_account_id:
+            return jsonify({'error': 'Conta de anúncios não conectada.'}), 400
 
-        # 1. Configura a chamada para a Graph API
-        ad_account_id = clinic.meta_ad_account_id
-        url = f"https://graph.facebook.com/v19.0/act_{ad_account_id}/insights"
+        ad_account_id = clinic.meta_ad_account_id.replace('act_', '')
         
-        params = {
+        # --- PARTE A: SINCRONIZA ESTATÍSTICAS (GASTOS) ---
+        url_stats = f"https://graph.facebook.com/v19.0/act_{ad_account_id}/insights"
+        params_stats = {
             'access_token': clinic.meta_access_token,
             'date_preset': 'maximum',
-            'fields': 'spend,clicks,cpc,cpm,impressions,actions',
+            'fields': 'spend,clicks,cpc,impressions',
             'level': 'account'
         }
-
-        response = requests.get(url, params=params)
         
-        # Tratamento de erro específico do Token Expirado
+        response = requests.get(url_stats, params=params_stats)
+        
         if response.status_code == 401:
-             return jsonify({'error': 'Token expirado ou inválido do Facebook'}), 401
+             return jsonify({'error': 'Token expirado. Reconecte o Facebook.'}), 401
 
-        if response.status_code != 200:
-            error_data = response.json()
-            return jsonify({'error': 'Erro no Facebook API', 'details': error_data}), 400
-
-        data = response.json().get('data', [])
+        stats_data = response.json().get('data', [])
         
-        # Se não tiver dados (conta nova sem gastos), retornamos zeros em vez de erro
         spend = 0.0
         clicks = 0
         cpc = 0.0
 
-        if data:
-            stats = data[0]
+        if stats_data:
+            stats = stats_data[0]
             spend = float(stats.get('spend', 0.0))
             clicks = int(stats.get('clicks', 0))
             cpc = float(stats.get('cpc', 0.0))
         
-        # Atualiza banco
+        # Atualiza Saldo
         clinic.current_ad_balance = spend
         clinic.last_sync_at = datetime.utcnow()
+        
+        # Atualiza Campanha de Resumo
+        camp = MarketingCampaign.query.filter_by(clinic_id=clinic.id, name="Resumo Meta Ads").first()
+        if not camp:
+            camp = MarketingCampaign(clinic_id=clinic.id, name="Resumo Meta Ads", status='active')
+            db.session.add(camp)
+        
+        camp.clicks = clicks
+        camp.cost_per_click = cpc
+        camp.budget = spend # Atualiza com o gasto real
+        
+        # --- PARTE B: IMPORTAÇÃO AUTOMÁTICA DE LEADS ---
+        new_leads_count = 0
+        try:
+            # Busca anúncios que tenham leads associados
+            url_leads = f"https://graph.facebook.com/v19.0/act_{ad_account_id}/ads"
+            params_leads = {
+                'access_token': clinic.meta_access_token,
+                'fields': 'name,leads{created_time,field_data}',
+                'limit': 50 # Pega os 50 anúncios mais recentes
+            }
+            
+            resp_leads = requests.get(url_leads, params=params_leads)
+            ads_list = resp_leads.json().get('data', [])
+            
+            for ad in ads_list:
+                if 'leads' in ad:
+                    # O Facebook retorna os leads dentro de cada anúncio
+                    fb_leads = ad['leads']['data']
+                    
+                    for fb_lead in fb_leads:
+                        # Processa os campos (Nome, Telefone, Email)
+                        field_data = fb_lead.get('field_data', [])
+                        lead_info = {'name': 'Paciente do Facebook', 'phone': '', 'email': ''}
+                        
+                        for field in field_data:
+                            if 'name' in field['name']: lead_info['name'] = field['values'][0]
+                            if 'phone' in field['name']: lead_info['phone'] = field['values'][0]
+                            if 'email' in field['name']: lead_info['email'] = field['values'][0]
+                        
+                        # Verifica se já existe esse lead na clínica (evita duplicar)
+                        exists = Lead.query.filter_by(
+                            clinic_id=clinic.id, 
+                            name=lead_info['name']
+                        ).first()
+                        
+                        if not exists:
+                            new_lead = Lead(
+                                clinic_id=clinic.id,
+                                name=lead_info['name'],
+                                phone=lead_info['phone'],
+                                source=f"FB Ads: {ad.get('name')}",
+                                status='new',
+                                created_at=datetime.utcnow(),
+                                notes="Importado automaticamente via Meta Ads"
+                            )
+                            db.session.add(new_lead)
+                            new_leads_count += 1
+                            
+        except Exception as e:
+            print(f"Erro ao importar leads (pode ser falta de permissão): {e}")
+
         db.session.commit()
 
         return jsonify({
-            'message': 'Sincronização Real Finalizada',
+            'message': 'Sincronização Completa',
             'spend': spend,
             'clicks': clicks,
-            'cpc': cpc
+            'cpc': cpc,
+            'leads_imported': new_leads_count
         }), 200
 
     except Exception as e:
@@ -233,9 +284,8 @@ def get_recall_campaign():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# --- 4. ROTA DE CRESCIMENTO (MANTER PARA NÃO QUEBRAR O FRONT) ---
+# --- 4. ROTA DE CRESCIMENTO ---
 @marketing_bp.route('/marketing/campaign/activate', methods=['POST'])
 @jwt_required()
 def activate_ads():
-    # Rota mantida para compatibilidade, mas o foco agora é o /connect e /sync
     return jsonify({'message': 'Use a conexão real com Meta Ads acima'}), 200
