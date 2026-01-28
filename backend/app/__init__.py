@@ -6,7 +6,7 @@ from flask_jwt_extended import JWTManager
 import os
 import logging
 
-# Configuração de Log para aparecer no painel do Render
+# Configuração de Log para o Render
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -26,10 +26,10 @@ def create_app():
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'super-secreta')
 
-    # Configuração de Timeout para conexões
+    # Engine Options para evitar conexões "zumbis" no Render Free
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         "pool_pre_ping": True,
-        "pool_recycle": 300,
+        "pool_recycle": 280,
     }
 
     CORS(app)
@@ -37,22 +37,7 @@ def create_app():
     migrate.init_app(app, db)
     jwt.init_app(app)
 
-    # --- BLOCO DE CORREÇÃO AUTOMÁTICA (PARA RENDER FREE) ---
-    with app.app_context():
-        from sqlalchemy import text
-        try:
-            logger.info("🔍 Verificando integridade das tabelas...")
-            # Tenta adicionar a coluna is_active na tabela users caso ela não exista
-            db.session.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;'))
-            # Tenta adicionar a coluna is_active na tabela clinics caso ela não exista (visto no seu models)
-            db.session.execute(text('ALTER TABLE clinics ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;'))
-            db.session.commit()
-            logger.info("✅ Colunas de segurança (is_active) verificadas/criadas.")
-        except Exception as e:
-            db.session.rollback()
-            logger.warning(f"⚠️ Nota sobre sincronização: {e}")
-    # -------------------------------------------------------
-
+    # Importação dos modelos para registro no SQLAlchemy
     from .models import Clinic, User, Patient, InventoryItem, Lead, Appointment, Transaction, Procedure, MarketingCampaign
 
     # --- REGISTRO DE BLUEPRINTS ---
@@ -86,35 +71,43 @@ def create_app():
     from .routes.procedure_routes import procedure_bp
     app.register_blueprint(procedure_bp, url_prefix='/api')
 
-    # --- ROTAS DE UTILIDADE ---
+    # --- ROTAS DE MANUTENÇÃO (REVISADAS) ---
 
     @app.route('/api/force_reset_db')
     def force_reset():
-        """Apaga e recria com logs para debug"""
+        """Força a limpeza total do PostgreSQL via Cascade"""
         confirm = request.args.get('confirm')
         if confirm != 'true':
             return "Erro: Adicione ?confirm=true", 403
         
         try:
-            logger.info("Iniciando Reset Total do Banco...")
+            from sqlalchemy import text
+            logger.info("🔥 Iniciando destruição e recriação do Banco via CASCADE...")
+            
+            # Limpa sessões pendentes para não travar o banco
             db.session.remove()
-            db.drop_all()
+            
+            # Comando SQL bruto para limpar o Schema Public (Eficaz no Render)
+            db.session.execute(text("DROP SCHEMA public CASCADE; CREATE SCHEMA public;"))
+            db.session.commit()
+            
+            # Recria todas as tabelas com a estrutura do models.py atualizado
             db.create_all()
-            logger.info("✅ Banco resetado com sucesso!")
-            return "✅ BANCO RESETADO COM SUCESSO! Prossiga para /api/seed_db_web", 200
+            
+            logger.info("✅ Estrutura física do banco reconstruída com sucesso!")
+            return "✅ BANCO RESETADO! Agora acesse /api/seed_db_web para criar o usuário.", 200
         except Exception as e:
+            db.session.rollback()
             logger.error(f"❌ Erro Crítico no Reset: {str(e)}")
             return f"Erro no servidor: {str(e)}", 500
 
     @app.route('/api/seed_db_web')
     def seed_db_web():
-        """Popula o banco via URL"""
+        """Popula os dados básicos de demonstração"""
         from werkzeug.security import generate_password_hash
         from datetime import datetime, timedelta
         try:
-            logger.info("Iniciando Seed de Dados...")
             db.create_all()
-
             if not Clinic.query.filter_by(name="OdontoSys Intelligence Demo").first():
                 demo_clinic = Clinic(
                     name="OdontoSys Intelligence Demo",
@@ -135,6 +128,7 @@ def create_app():
                 )
                 db.session.add(admin)
 
+                # Cria o paciente para teste de Recall IA
                 eight_months_ago = datetime.utcnow() - timedelta(days=240)
                 p1 = Patient(
                     name="Carlos Eduardo", 
@@ -145,13 +139,10 @@ def create_app():
                 db.session.add(p1)
                 
                 db.session.commit()
-                logger.info("✅ Seed Finalizado!")
-                return "✅ BANCO POPULADO! Use admin@odonto.com / admin123", 200
-            
-            return "ℹ️ O banco já possui dados.", 200
+                return "✅ BANCO POPULADO! Login: admin@odonto.com | Senha: admin123", 200
+            return "ℹ️ O banco já possui os dados da demonstração.", 200
         except Exception as e:
             db.session.rollback()
-            logger.error(f"❌ Erro no Seed: {str(e)}")
             return f"Erro no seed: {str(e)}", 500
 
     @app.route('/')
