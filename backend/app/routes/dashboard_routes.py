@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify
 from app.models import db, Patient, InventoryItem, Transaction, Lead, User, Appointment
-from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime
 
 dashboard_bp = Blueprint('dashboard', __name__)
@@ -9,8 +9,13 @@ dashboard_bp = Blueprint('dashboard', __name__)
 @jwt_required()
 def get_stats():
     try:
-        claims = get_jwt()
-        current_clinic_id = claims['clinic_id']
+        # Busca segura do usuário para garantir a clínica correta pós-reset
+        user_id = get_jwt_identity()
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'Usuário não encontrado'}), 404
+            
+        current_clinic_id = user.clinic_id
         
         # 1. Estatísticas Básicas
         total_patients = Patient.query.filter_by(clinic_id=current_clinic_id).count() or 0
@@ -29,8 +34,14 @@ def get_stats():
         ).all()
         
         # Somas seguras tratando explicitamente tipos para o Frontend
-        faturamento_dia = sum(float(t.amount or 0) for t in transacoes_hoje if t.type == 'income') if transacoes_hoje else 0.0
-        lucro_dia = sum(float((t.amount or 0) - (t.cost or 0)) for t in transacoes_hoje if t.type == 'income') if transacoes_hoje else 0.0
+        # O 'or 0.0' garante que se o banco retornar None, o Python soma 0.0
+        faturamento_dia = sum(float(t.amount or 0.0) for t in transacoes_hoje if t.type == 'income')
+        
+        lucro_dia = sum(
+            float((t.amount or 0.0) - (t.cost or 0.0)) 
+            for t in transacoes_hoje 
+            if t.type == 'income'
+        )
         
         # 3. Consultas do dia
         agendamentos_hoje = Appointment.query.filter(
@@ -73,17 +84,22 @@ def get_conversion_stats():
         conversions_count = 0
 
         for patient in converted_patients:
-            appts = getattr(patient, 'appointments_list', [])
+            # Query direta para evitar erro de atributo no relacionamento
+            appts = Appointment.query.filter_by(patient_id=patient.id).all()
+            
             for appt in appts:
                 if appt.status == 'concluido':
                     conversions_count += 1
                     transaction = Transaction.query.filter_by(appointment_id=appt.id).first()
                     if transaction:
-                        total_revenue_bot += float(transaction.amount or 0)
-                        total_profit_bot += float((transaction.amount or 0) - (transaction.cost or 0))
+                        amount = float(transaction.amount or 0.0)
+                        cost = float(transaction.cost or 0.0)
+                        
+                        total_revenue_bot += amount
+                        total_profit_bot += (amount - cost)
 
         # Divisão segura
-        rate = (conversions_count / bot_leads * 100) if bot_leads > 0 else 0
+        rate = (conversions_count / bot_leads * 100) if bot_leads > 0 else 0.0
 
         return jsonify({
             'leads_generated': int(bot_leads),
