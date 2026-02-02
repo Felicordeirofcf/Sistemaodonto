@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 EVOLUTION_API_URL = os.getenv("WHATSAPP_QR_SERVICE_URL", "http://localhost:8080").rstrip("/")
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "minha-senha-secreta")
 
+# --- MEMÓRIA TEMPORÁRIA (Para controlar o tempo) ---
+# Guarda o horário da última tentativa de conexão de cada clínica
+startup_cooldown = {} 
+
 def get_headers():
     return {
         "apikey": EVOLUTION_API_KEY,
@@ -23,10 +27,10 @@ def get_headers():
     }
 
 def get_instance_name(clinic_id):
-    # Mantemos o nome da nova clínica para usar o banco novo
+    # Vamos manter o nome para usar o banco novo e o redis novo
     return f"clinica_nova_{clinic_id}"
 
-# --- FUNÇÃO: CHECAR E CRIAR INSTÂNCIA ---
+# --- FUNÇÃO: GARANTIR QUE A INSTÂNCIA EXISTE ---
 def ensure_instance(clinic_id):
     instance_name = get_instance_name(clinic_id)
     try:
@@ -42,7 +46,7 @@ def ensure_instance(clinic_id):
                  if instance_name in instances: exists = True
             
             if exists:
-                return True # Já existe, tudo certo.
+                return True 
 
         # Se não existe, CRIA
         payload = {
@@ -61,7 +65,7 @@ def ensure_instance(clinic_id):
     
     return False
 
-# --- ROTA: GERAR QR CODE (COM PROTEÇÃO ANTI-LOOP) ---
+# --- ROTA: GERAR QR CODE (COM COOLDOWN DE 40s) ---
 @bp.route('/whatsapp/qr', methods=['GET'])
 @jwt_required()
 def get_qr():
@@ -72,42 +76,45 @@ def get_qr():
     
     instance_name = get_instance_name(clinic_id)
 
+    # --- BLOQUEIO DE SEGURANÇA (COOLDOWN) ---
+    # Se mandamos conectar há menos de 40 segundos, OBRIGA a esperar.
+    last_attempt = startup_cooldown.get(instance_name, 0)
+    if time.time() - last_attempt < 40:
+        logger.info(f"⏳ Cooldown ativo para {instance_name}. Aguardando inicialização...")
+        # Retorna 'disconnected' mas com mensagem de aguarde, para o front não bugar
+        return jsonify({
+            "status": "disconnected", 
+            "qr_base64": None, 
+            "message": "Iniciando... (Aguarde o QR Code)"
+        }), 200
+
     try:
         ensure_instance(clinic_id)
 
-        # 1. PRIMEIRO: Verifica o estado ATUAL antes de mandar conectar
+        # 1. Verifica estado
         state_url = f"{EVOLUTION_API_URL}/instance/connectionState/{instance_name}"
         r_state = requests.get(state_url, headers=get_headers(), timeout=5)
         
         current_state = "close"
         if r_state.status_code == 200:
             data = r_state.json()
-            # Ajuste para ler corretamente o retorno da v2
             current_state = data.get('instance', {}).get('state') or data.get('state')
 
-        logger.info(f"Estado atual da instância: {current_state}")
+        logger.info(f"Estado real da instância: {current_state}")
 
-        # 2. DECISÃO INTELIGENTE
         if current_state == 'open':
             return jsonify({"status": "connected", "qr_base64": None}), 200
-            
+        
         elif current_state == 'connecting':
-            # SE JÁ ESTÁ CONECTANDO, NÃO FAZ NADA! Só espera.
-            # Tenta buscar o QR Code se já tiver sido gerado no background
-            connect_url = f"{EVOLUTION_API_URL}/instance/connect/{instance_name}"
-            r_qr = requests.get(connect_url, headers=get_headers(), timeout=10)
-            qr_base64 = None
-            if r_qr.status_code == 200:
-                qr_base64 = r_qr.json().get('base64')
-            
-            return jsonify({
-                "status": "disconnected", 
-                "qr_base64": qr_base64, 
-                "message": "Carregando..."
-            }), 200
+            return jsonify({"status": "disconnected", "message": "Conectando..."}), 200
 
         else:
-            # SÓ MANDA CONECTAR SE ESTIVER FECHADO (CLOSE)
+            # ESTÁ FECHADA. MANDA CONECTAR E ATIVA O COOLDOWN.
+            logger.info(f"Enviando comando CONNECT para {instance_name}...")
+            
+            # ATIVA O TIMER: Proíbe novos comandos por 40 segundos
+            startup_cooldown[instance_name] = time.time()
+            
             connect_url = f"{EVOLUTION_API_URL}/instance/connect/{instance_name}"
             r = requests.get(connect_url, headers=get_headers(), timeout=15)
             
