@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { GeometricTooth } from '../components/GeometricTooth'; 
 import { Save, User, Eraser, Loader2 } from 'lucide-react';
 import { Skull3D } from '../components/Skull3D';
+import { AlertCircle } from 'lucide-react';
 
 export type ToothFace = 'vestibular' | 'lingual' | 'distal' | 'mesial' | 'oclusal' | 'occlusal';
 export type TreatmentType = 'caries' | 'restoration' | 'canal' | 'extraction' | 'implant' | null;

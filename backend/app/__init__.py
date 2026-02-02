@@ -26,21 +26,24 @@ def create_app():
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'super-secreta')
 
-    # Engine Options para evitar conexões "zumbis" no Render Free
+    # Engine Options para performance no Render Free
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         "pool_pre_ping": True,
         "pool_recycle": 280,
     }
 
-    CORS(app)
+    # Configuração de CORS para permitir cabeçalhos de autenticação
+    CORS(app, resources={r"/*": {"origins": "*"}}) 
+    
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
 
-    # Importação dos modelos para registro no SQLAlchemy
+    # Importação dos modelos
     from .models import Clinic, User, Patient, InventoryItem, Appointment, Transaction
 
     # --- REGISTRO DE BLUEPRINTS ---
+    # Nota: Certifique-se de que as rotas dentro dos Blueprints usem os métodos corretos (POST, GET)
     from .routes.auth_routes import auth_bp
     app.register_blueprint(auth_bp, url_prefix='/auth')
     
@@ -56,8 +59,6 @@ def create_app():
     from .routes.atende_chat_routes import atende_chat_bp
     app.register_blueprint(atende_chat_bp, url_prefix='/api')
 
-
-
     from .routes.agenda_routes import agenda_bp
     app.register_blueprint(agenda_bp, url_prefix='/api')
 
@@ -67,41 +68,28 @@ def create_app():
     from .routes.team_routes import team_bp
     app.register_blueprint(team_bp, url_prefix='/api') 
 
-
-
-    # --- ROTAS DE MANUTENÇÃO (REVISADAS) ---
+    # --- ROTAS DE MANUTENÇÃO ---
 
     @app.route('/api/force_reset_db')
     def force_reset():
-        """Força a limpeza total do PostgreSQL via Cascade"""
         confirm = request.args.get('confirm')
         if confirm != 'true':
-            return "Erro: Adicione ?confirm=true", 403
+            return jsonify({"error": "Confirmação necessária"}), 403
         
         try:
             from sqlalchemy import text
-            logger.info("🔥 Iniciando destruição e recriação do Banco via CASCADE...")
-            
-            # Limpa sessões pendentes para não travar o banco
             db.session.remove()
-            
-            # Comando SQL bruto para limpar o Schema Public (Eficaz no Render)
+            # CASCADE é vital para o Postgres no Render
             db.session.execute(text("DROP SCHEMA public CASCADE; CREATE SCHEMA public;"))
             db.session.commit()
-            
-            # Recria todas as tabelas com a estrutura do models.py atualizado
             db.create_all()
-            
-            logger.info("✅ Estrutura física do banco reconstruída com sucesso!")
-            return "✅ BANCO RESETADO! Agora acesse /api/seed_db_web para criar o usuário.", 200
+            return jsonify({"message": "Banco resetado com sucesso!"}), 200
         except Exception as e:
             db.session.rollback()
-            logger.error(f"❌ Erro Crítico no Reset: {str(e)}")
-            return f"Erro no servidor: {str(e)}", 500
+            return jsonify({"error": str(e)}), 500
 
     @app.route('/api/seed_db_web')
     def seed_db_web():
-        """Popula os dados básicos de demonstração"""
         from werkzeug.security import generate_password_hash
         from datetime import datetime, timedelta
         try:
@@ -126,22 +114,21 @@ def create_app():
                 )
                 db.session.add(admin)
 
-                # Cria o paciente para teste de Recall IA
-                eight_months_ago = datetime.utcnow() - timedelta(days=240)
+                # Paciente para teste
                 p1 = Patient(
                     name="Carlos Eduardo", 
                     phone="11999999999", 
-                    last_visit=eight_months_ago, 
+                    last_visit=datetime.utcnow() - timedelta(days=240), 
                     clinic_id=demo_clinic.id
                 )
                 db.session.add(p1)
                 
                 db.session.commit()
-                return "✅ BANCO POPULADO! Login: admin@odonto.com | Senha: admin123", 200
-            return "ℹ️ O banco já possui os dados da demonstração.", 200
+                return jsonify({"message": "Seed finalizado", "user": "admin@odonto.com", "pass": "admin123"}), 200
+            return jsonify({"message": "Dados já existentes"}), 200
         except Exception as e:
             db.session.rollback()
-            return f"Erro no seed: {str(e)}", 500
+            return jsonify({"error": str(e)}), 500
 
     @app.route('/')
     def index():
