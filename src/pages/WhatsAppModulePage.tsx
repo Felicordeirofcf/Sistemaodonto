@@ -1,17 +1,26 @@
 // src/pages/WhatsAppModulePage.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { RefreshCcw, Send, PlugZap, ShieldAlert } from "lucide-react";
 
 type QRStatus = {
   status: "connected" | "disconnected" | "connecting";
-  qr_base64?: string; // data:image/png;base64,...
+  qr_base64?: string;
   last_update?: string;
+  error?: string;
 };
 
 type ApiResult = { ok: boolean; message?: string };
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 const API = (path: string) => `${API_BASE}${path}`;
+
+function authHeaders() {
+  const token = localStorage.getItem("odonto_token"); // ✅ token correto
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
 
 export function WhatsAppModulePage() {
   const [qr, setQr] = useState<QRStatus>({ status: "connecting" });
@@ -27,22 +36,28 @@ export function WhatsAppModulePage() {
   const [savingRecall, setSavingRecall] = useState(false);
   const [recallSaved, setRecallSaved] = useState<string | null>(null);
 
-  const headers = useMemo(() => {
-    const token = localStorage.getItem("odonto_token"); // ✅ igual seu App
-    return {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    };
-  }, []);
+  const [authProblem, setAuthProblem] = useState<string | null>(null);
 
   async function fetchQR() {
+    setAuthProblem(null);
+
     try {
       setLoadingQR(true);
-      const res = await fetch(API("/api/marketing/whatsapp/qr"), { headers });
+
+      const res = await fetch(API("/api/marketing/whatsapp/qr"), {
+        headers: authHeaders(),
+      });
+
+      if (res.status === 401 || res.status === 422) {
+        setAuthProblem("Sua sessão expirou ou você não está autenticado. Faça login novamente.");
+        setQr({ status: "disconnected" });
+        return;
+      }
+
       const data = await res.json();
       setQr(data);
-    } catch (e) {
-      setQr({ status: "disconnected" });
+    } catch {
+      setQr({ status: "disconnected", error: "Falha de rede ao buscar QR." });
     } finally {
       setLoadingQR(false);
     }
@@ -50,13 +65,22 @@ export function WhatsAppModulePage() {
 
   async function sendTest() {
     setSendResult(null);
+    setAuthProblem(null);
     setSending(true);
+
     try {
       const res = await fetch(API("/api/marketing/whatsapp/send"), {
         method: "POST",
-        headers,
+        headers: authHeaders(),
         body: JSON.stringify({ to, message: msg }),
       });
+
+      if (res.status === 401 || res.status === 422) {
+        setAuthProblem("Sua sessão expirou ou você não está autenticado. Faça login novamente.");
+        setSendResult({ ok: false, message: "Não autenticado" });
+        return;
+      }
+
       const data = await res.json();
       setSendResult(data);
     } catch {
@@ -69,12 +93,21 @@ export function WhatsAppModulePage() {
   async function saveRecallConfig() {
     setSavingRecall(true);
     setRecallSaved(null);
+    setAuthProblem(null);
+
     try {
       const res = await fetch(API("/api/marketing/whatsapp/recall/config"), {
         method: "POST",
-        headers,
+        headers: authHeaders(),
         body: JSON.stringify({ days: recallDays, hour: recallHour }),
       });
+
+      if (res.status === 401 || res.status === 422) {
+        setAuthProblem("Sua sessão expirou ou você não está autenticado. Faça login novamente.");
+        setRecallSaved("Não autenticado");
+        return;
+      }
+
       const data = await res.json();
       setRecallSaved(data?.ok ? "Configuração salva ✅" : data?.message || "Erro ao salvar");
     } catch {
@@ -88,7 +121,6 @@ export function WhatsAppModulePage() {
     fetchQR();
     const t = setInterval(fetchQR, 12000);
     return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -111,6 +143,18 @@ export function WhatsAppModulePage() {
             Atualizar
           </button>
         </div>
+
+        {authProblem && (
+          <div className="mt-4 rounded-xl border border-yellow-800 bg-yellow-900/20 p-3 text-sm text-yellow-200">
+            {authProblem}
+          </div>
+        )}
+
+        {qr?.error && (
+          <div className="mt-4 rounded-xl border border-rose-800 bg-rose-900/20 p-3 text-sm text-rose-200">
+            {qr.error}
+          </div>
+        )}
 
         <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
           {/* STATUS + QR */}
@@ -147,11 +191,7 @@ export function WhatsAppModulePage() {
 
                 <div className="mt-3 flex items-center justify-center rounded-2xl bg-[#070B14] p-3">
                   {qr.qr_base64 ? (
-                    <img
-                      src={qr.qr_base64}
-                      alt="QR Code WhatsApp"
-                      className="h-56 w-56 rounded-xl"
-                    />
+                    <img src={qr.qr_base64} alt="QR Code WhatsApp" className="h-56 w-56 rounded-xl" />
                   ) : (
                     <div className="flex h-56 w-56 items-center justify-center text-xs text-slate-500">
                       QR ainda não disponível…
@@ -161,9 +201,7 @@ export function WhatsAppModulePage() {
 
                 <div className="mt-3 flex items-start gap-2 rounded-xl border border-slate-800 bg-[#0F1A2B] p-3 text-xs text-slate-300">
                   <ShieldAlert size={16} className="mt-[2px] text-yellow-300" />
-                  <p>
-                    Modo QR é só para testes. Para produção, o ideal é migrar para WhatsApp Business API.
-                  </p>
+                  <p>Modo QR é só para testes. Para produção, o ideal é migrar para WhatsApp Business API.</p>
                 </div>
               </div>
             )}
@@ -178,9 +216,7 @@ export function WhatsAppModulePage() {
           {/* ENVIO TESTE */}
           <div className="rounded-2xl border border-slate-800 bg-[#0B1220] p-4 lg:col-span-2">
             <h2 className="text-base font-semibold">Envio de teste</h2>
-            <p className="mt-1 text-xs text-slate-400">
-              Use número no formato internacional (ex.: 55DDDNUMERO).
-            </p>
+            <p className="mt-1 text-xs text-slate-400">Use número no formato internacional (ex.: 55DDDNUMERO).</p>
 
             <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
               <div className="lg:col-span-1">

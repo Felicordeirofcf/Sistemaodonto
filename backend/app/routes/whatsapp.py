@@ -1,7 +1,7 @@
 # backend/app/routes/marketing/whatsapp.py
 import os
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -11,57 +11,87 @@ from app.models import WhatsAppConnection, WhatsAppContact, MessageLog
 
 bp = Blueprint("marketing_whatsapp", __name__)
 
-WHATSAPP_QR_SERVICE_URL = os.getenv("WHATSAPP_QR_SERVICE_URL", "http://localhost:3333")
+# IMPORTANTE: em produção isso precisa apontar pro serviço NODE
+# Ex: https://sistemaodonto-1.onrender.com
+WHATSAPP_QR_SERVICE_URL = (os.getenv("WHATSAPP_QR_SERVICE_URL") or "http://localhost:3333").rstrip("/")
 INTERNAL_WEBHOOK_SECRET = os.getenv("INTERNAL_WEBHOOK_SECRET", "dev_secret")
 
-def get_clinic_id():
+def get_clinic_id() -> int:
     """
-    Ajuste aqui para o seu multi-tenant.
-    Se seu jwt_identity já carrega clinic_id, use isso.
+    Multi-tenant: se o jwt_identity já carrega clinic_id, usa.
+    Caso contrário (1 clínica): retorna 1.
     """
     identity = get_jwt_identity()
-    # exemplo comum:
     if isinstance(identity, dict) and "clinic_id" in identity:
         return int(identity["clinic_id"])
-    # fallback (1 clínica)
     return 1
+
 
 @bp.get("/api/marketing/whatsapp/qr")
 @jwt_required()
 def get_qr():
     clinic_id = get_clinic_id()
 
-    # tenta buscar status/qr do serviço node
     try:
-        r = requests.get(f"{WHATSAPP_QR_SERVICE_URL}/qr", timeout=8)
+        url = f"{WHATSAPP_QR_SERVICE_URL}/qr"
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
         data = r.json()
+
         status = data.get("status", "disconnected")
         qr_base64 = data.get("qr_base64")
 
-        # salva status em db
+        # salva status em db (mvp)
         conn = WhatsAppConnection.query.filter_by(clinic_id=clinic_id).first()
         if not conn:
             conn = WhatsAppConnection(clinic_id=clinic_id, provider="qr")
             db.session.add(conn)
 
         conn.status = status
-        conn.session_data = {"provider": "qr", "last_qr": bool(qr_base64)}
+        sd = conn.session_data or {}
+        sd.update({
+            "provider": "qr",
+            "last_qr": bool(qr_base64),
+            "last_sync_at": datetime.utcnow().isoformat(),
+            "node_url": WHATSAPP_QR_SERVICE_URL
+        })
+        conn.session_data = sd
         db.session.commit()
 
         return jsonify({
             "status": status,
             "qr_base64": qr_base64,
             "last_update": datetime.utcnow().isoformat()
-        })
-    except Exception:
-        return jsonify({"status": "disconnected"}), 200
+        }), 200
+
+    except Exception as e:
+        # LOG REAL PRO RENDER (sem isso você fica cego)
+        print("WHATSAPP_QR_ERROR:", str(e), "NODE_URL:", WHATSAPP_QR_SERVICE_URL)
+
+        # persiste status desconectado
+        try:
+            conn = WhatsAppConnection.query.filter_by(clinic_id=clinic_id).first()
+            if not conn:
+                conn = WhatsAppConnection(clinic_id=clinic_id, provider="qr")
+                db.session.add(conn)
+            conn.status = "disconnected"
+            sd = conn.session_data or {}
+            sd.update({"last_error": str(e), "node_url": WHATSAPP_QR_SERVICE_URL})
+            conn.session_data = sd
+            db.session.commit()
+        except Exception as e2:
+            print("WHATSAPP_QR_DB_ERROR:", str(e2))
+
+        # retorna disconnected com motivo (ajuda debug)
+        return jsonify({"status": "disconnected", "error": str(e)}), 200
 
 
 @bp.post("/api/marketing/whatsapp/send")
 @jwt_required()
 def send_message():
     clinic_id = get_clinic_id()
-    body = request.get_json(force=True)
+    body = request.get_json(force=True) or {}
+
     to = (body.get("to") or "").strip()
     message = (body.get("message") or "").strip()
 
@@ -75,7 +105,6 @@ def send_message():
         db.session.add(contact)
         db.session.commit()
 
-    # log queued
     log = MessageLog(
         clinic_id=clinic_id,
         contact_id=contact.id,
@@ -87,22 +116,22 @@ def send_message():
     db.session.commit()
 
     try:
-        r = requests.post(
-            f"{WHATSAPP_QR_SERVICE_URL}/send",
-            json={"to": to, "message": message, "clinic_id": clinic_id},
-            timeout=12
-        )
-        data = r.json()
-        if data.get("ok"):
+        url = f"{WHATSAPP_QR_SERVICE_URL}/send"
+        r = requests.post(url, json={"to": to, "message": message, "clinic_id": clinic_id}, timeout=15)
+        data = r.json() if r.content else {}
+
+        if r.ok and data.get("ok"):
             log.status = "sent"
             contact.last_outbound_at = datetime.utcnow()
             db.session.commit()
-            return jsonify({"ok": True})
-        else:
-            log.status = "failed"
-            db.session.commit()
-            return jsonify({"ok": False, "message": data.get("message", "Falha no provider")}), 400
-    except Exception:
+            return jsonify({"ok": True}), 200
+
+        log.status = "failed"
+        db.session.commit()
+        return jsonify({"ok": False, "message": data.get("message", "Falha no provider")}), 400
+
+    except Exception as e:
+        print("WHATSAPP_SEND_ERROR:", str(e), "NODE_URL:", WHATSAPP_QR_SERVICE_URL)
         log.status = "failed"
         db.session.commit()
         return jsonify({"ok": False, "message": "Provider indisponível"}), 500
@@ -118,13 +147,14 @@ def webhook_incoming():
     if secret != INTERNAL_WEBHOOK_SECRET:
         return jsonify({"ok": False, "message": "unauthorized"}), 401
 
-    payload = request.get_json(force=True)
+    payload = request.get_json(force=True) or {}
+
     clinic_id = int(payload.get("clinic_id") or 1)
     from_phone = (payload.get("from") or "").strip()
     text = (payload.get("body") or "").strip()
 
     if not from_phone or not text:
-        return jsonify({"ok": False}), 400
+        return jsonify({"ok": False, "message": "payload inválido"}), 400
 
     contact = WhatsAppContact.query.filter_by(clinic_id=clinic_id, phone=from_phone).first()
     if not contact:
@@ -144,16 +174,15 @@ def webhook_incoming():
     db.session.add(log)
     db.session.commit()
 
-    # MVP: aqui depois plugamos o "motor recepcionista"
-    return jsonify({"ok": True})
+    return jsonify({"ok": True}), 200
 
 
-# Config de recall: salva em DB simples (1 clínica), ou pode virar tabela
 @bp.post("/api/marketing/whatsapp/recall/config")
 @jwt_required()
 def recall_config():
     clinic_id = get_clinic_id()
-    data = request.get_json(force=True)
+    data = request.get_json(force=True) or {}
+
     days = int(data.get("days", 30))
     hour = str(data.get("hour", "09:00"))
 
@@ -162,11 +191,10 @@ def recall_config():
         conn = WhatsAppConnection(clinic_id=clinic_id, provider="qr")
         db.session.add(conn)
 
-    # guarda config dentro do session_data (MVP)
     sd = conn.session_data or {}
     sd["recall_days"] = days
     sd["recall_hour"] = hour
     conn.session_data = sd
     db.session.commit()
 
-    return jsonify({"ok": True})
+    return jsonify({"ok": True}), 200
