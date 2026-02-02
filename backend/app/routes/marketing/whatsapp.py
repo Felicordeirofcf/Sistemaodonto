@@ -23,8 +23,8 @@ def get_headers():
     }
 
 def get_instance_name(clinic_id):
-    # Nome final para encerrar a novela
-    return f"clinica_final_{clinic_id}"
+    # Mantemos o nome da nova clínica para usar o banco novo
+    return f"clinica_nova_{clinic_id}"
 
 # --- FUNÇÃO: CHECAR E CRIAR INSTÂNCIA ---
 def ensure_instance(clinic_id):
@@ -82,6 +82,7 @@ def get_qr():
         current_state = "close"
         if r_state.status_code == 200:
             data = r_state.json()
+            # Ajuste para ler corretamente o retorno da v2
             current_state = data.get('instance', {}).get('state') or data.get('state')
 
         logger.info(f"Estado atual da instância: {current_state}")
@@ -92,7 +93,7 @@ def get_qr():
             
         elif current_state == 'connecting':
             # SE JÁ ESTÁ CONECTANDO, NÃO FAZ NADA! Só espera.
-            # Tenta buscar o QR Code se já tiver sido gerado
+            # Tenta buscar o QR Code se já tiver sido gerado no background
             connect_url = f"{EVOLUTION_API_URL}/instance/connect/{instance_name}"
             r_qr = requests.get(connect_url, headers=get_headers(), timeout=10)
             qr_base64 = None
@@ -101,8 +102,8 @@ def get_qr():
             
             return jsonify({
                 "status": "disconnected", 
-                "qr_base64": qr_base64, # Pode ser null se ainda estiver carregando
-                "message": "Iniciando..."
+                "qr_base64": qr_base64, 
+                "message": "Carregando..."
             }), 200
 
         else:
@@ -127,8 +128,6 @@ def get_qr():
 @bp.route('/whatsapp/send', methods=['POST'])
 @jwt_required()
 def send_message():
-    # ... (Mantenha o código de envio igual, ele não causa problemas)
-    # Vou replicar aqui para facilitar o copy-paste completo
     identity = get_jwt_identity()
     clinic_id = 1
     if isinstance(identity, dict):
