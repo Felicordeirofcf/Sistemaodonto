@@ -25,22 +25,42 @@ def get_headers():
         "Content-Type": "application/json"
     }
 
-def get_instance_name(clinic_id):
-    return f"clinica_v3_{clinic_id}"
+# --- FUNÇÃO NOVA: EXTRAIR ID ÚNICO DO USUÁRIO ---
+def get_unique_instance_name():
+    identity = get_jwt_identity()
+    user_id = "1" # Fallback seguro
+    
+    # Tenta extrair o ID de várias formas possíveis dependendo do seu JWT
+    if identity:
+        if isinstance(identity, dict):
+            # Tenta pegar 'id', 'user_id', 'sub' ou 'clinic_id'
+            user_id = str(identity.get("id") or identity.get("user_id") or identity.get("sub") or identity.get("clinic_id") or "1")
+        else:
+            # Se a identidade for apenas o ID direto (string/int)
+            user_id = str(identity)
+    
+    # Cria um nome ÚNICO para cada cliente: ex: clinica_v3_15, clinica_v3_20...
+    return f"clinica_v3_{user_id}"
 
 # --- FUNÇÃO: GARANTIR QUE A INSTÂNCIA EXISTE ---
-def ensure_instance(clinic_id):
-    instance_name = get_instance_name(clinic_id)
+def ensure_instance(instance_name):
     try:
+        # 1. Verifica se existe
         r = requests.get(f"{EVOLUTION_API_URL}/instance/fetchInstances", headers=get_headers(), timeout=30)
+        exists = False
         if r.status_code == 200:
             instances = r.json()
             if isinstance(instances, list):
                 for inst in instances:
-                    if inst.get('name') == instance_name: return True
+                    if inst.get('name') == instance_name: exists = True
             elif isinstance(instances, dict):
-                 if instance_name in instances: return True
+                 if instance_name in instances: exists = True
+        
+        if exists:
+            return True 
 
+        # 2. Se não existe, CRIA UMA NOVA
+        logger.info(f"Criando nova instância exclusiva: {instance_name}")
         payload = {
             "instanceName": instance_name,
             "token": f"token_{instance_name}",
@@ -64,6 +84,7 @@ def ensure_instance(clinic_id):
             except:
                 pass
             return True
+            
     except Exception as e:
         logger.error(f"Erro instance: {e}")
         return False
@@ -72,13 +93,9 @@ def ensure_instance(clinic_id):
 @bp.route('/whatsapp/qr', methods=['GET'])
 @jwt_required()
 def get_qr():
-    identity = get_jwt_identity()
-    clinic_id = 1
-    if isinstance(identity, dict):
-        clinic_id = identity.get("clinic_id", 1)
-    
-    instance_name = get_instance_name(clinic_id)
-    ensure_instance(clinic_id)
+    # Pega o nome único baseado no usuário logado
+    instance_name = get_unique_instance_name()
+    ensure_instance(instance_name)
 
     try:
         qr_code = None
@@ -117,16 +134,13 @@ def get_qr():
         logger.error(f"Erro rota QR: {e}")
         return jsonify({"status": "disconnected"}), 200
 
-# --- ROTA: ENVIAR MENSAGEM (CORRIGIDA PARA FORMATO SIMPLES) ---
+# --- ROTA: ENVIAR MENSAGEM ---
 @bp.route('/whatsapp/send', methods=['POST'])
 @jwt_required()
 def send_message():
-    identity = get_jwt_identity()
-    clinic_id = 1
-    if isinstance(identity, dict):
-        clinic_id = identity.get("clinic_id", 1)
-
-    instance_name = get_instance_name(clinic_id)
+    # Pega o nome único (garante que cada um usa o SEU whatsapp)
+    instance_name = get_unique_instance_name()
+    
     body = request.get_json(force=True) or {}
     to = (body.get("to") or "").strip()
     message = (body.get("message") or "").strip()
@@ -139,19 +153,24 @@ def send_message():
     try:
         send_url = f"{EVOLUTION_API_URL}/message/sendText/{instance_name}"
         
-        # --- CORREÇÃO AQUI ---
-        # A Evolution estava reclamando que faltava a propriedade "text".
-        # Vamos enviar no formato simplificado que funciona em todas as versões.
         payload = {
             "number": phone_number,
-            "text": message,  # <--- OBRIGATÓRIO NA RAIZ
+            "text": message,
             "delay": 1200,
             "linkPreview": False
         }
 
         r = requests.post(send_url, json=payload, headers=get_headers(), timeout=40)
         
+        # Opcional: Salvar log (usando clinic_id 1 genérico se não tiver no token, só para não quebrar)
         try:
+            identity = get_jwt_identity()
+            clinic_id = 1
+            if isinstance(identity, dict):
+                clinic_id = identity.get("clinic_id", 1)
+            elif isinstance(identity, (str, int)) and str(identity).isdigit():
+                 clinic_id = int(identity)
+
             contact = WhatsAppContact.query.filter_by(clinic_id=clinic_id, phone=to).first()
             if not contact:
                 contact = WhatsAppContact(clinic_id=clinic_id, phone=to, name="Cliente", opt_in=True)
