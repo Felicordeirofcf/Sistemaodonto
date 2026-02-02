@@ -3,148 +3,181 @@ import requests
 import logging
 from datetime import datetime
 
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from sqlalchemy.exc import ProgrammingError
 
-# Importação dos models e do db
-from app.models import db, WhatsAppConnection, WhatsAppContact, MessageLog, User
+from app.models import db, WhatsAppContact, MessageLog, User
 
-# --- CORREÇÃO CRÍTICA: O NOME DEVE SER 'bp' ---
-# Isso alinha com o que o seu __init__.py está esperando.
+# Nome "bp" para bater com o __init__.py
 bp = Blueprint("marketing_whatsapp", __name__)
-
 logger = logging.getLogger(__name__)
 
-# Configuração
-WHATSAPP_QR_SERVICE_URL = os.getenv("WHATSAPP_QR_SERVICE_URL", "http://localhost:3333").rstrip("/")
-INTERNAL_WEBHOOK_SECRET = os.getenv("INTERNAL_WEBHOOK_SECRET", "dev_secret")
+# --- CONFIGURAÇÕES ---
+# Pega a URL e a Senha que você configurou no Environment do Render
+EVOLUTION_API_URL = os.getenv("WHATSAPP_QR_SERVICE_URL", "http://localhost:8080").rstrip("/")
+EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "minha-senha-secreta")
 
-def get_clinic_id():
-    identity = get_jwt_identity()
-    if isinstance(identity, dict) and "clinic_id" in identity:
-        return int(identity["clinic_id"])
+def get_headers():
+    return {
+        "apikey": EVOLUTION_API_KEY,
+        "Content-Type": "application/json"
+    }
+
+def get_instance_name(clinic_id):
+    """Cria um nome único para a instância da clínica (ex: clinica_1)"""
+    return f"clinica_{clinic_id}"
+
+# --- FUNÇÃO: GARANTIR QUE A INSTÂNCIA EXISTE NA EVOLUTION ---
+def ensure_instance(clinic_id):
+    instance_name = get_instance_name(clinic_id)
     
+    # 1. Verifica se a instância já existe
     try:
-        user = User.query.get(int(identity))
-        if user:
-            return user.clinic_id
-    except:
-        pass
-    return 1
-
-# --- ROTA: HEALTH ---
-@bp.route('/whatsapp/health', methods=['GET'])
-@jwt_required()
-def health():
-    clinic_id = get_clinic_id()
-    try:
-        r = requests.get(f"{WHATSAPP_QR_SERVICE_URL}/health", timeout=3)
-        return jsonify({"ok": True, "node": r.json(), "clinic_id": clinic_id})
+        r = requests.get(f"{EVOLUTION_API_URL}/instance/fetchInstances", headers=get_headers(), timeout=5)
+        if r.status_code == 200:
+            instances = r.json()
+            # A Evolution v2 pode retornar uma lista ou um dicionário
+            if isinstance(instances, list):
+                for inst in instances:
+                    if inst.get('name') == instance_name: return True
+            elif isinstance(instances, dict):
+                 if instance_name in instances: return True
     except Exception as e:
-        return jsonify({"ok": False, "message": "Node offline (Simulação)", "clinic_id": clinic_id}), 200
+        logger.error(f"Erro ao checar instância: {e}")
 
-# --- ROTA: QR CODE ---
+    # 2. Se não existe, CRIA UMA NOVA
+    try:
+        payload = {
+            "instanceName": instance_name,
+            "token": f"token_{instance_name}",
+            "qrcode": True,
+            "integration": "WHATSAPP-BAILEYS" 
+        }
+        r = requests.post(f"{EVOLUTION_API_URL}/instance/create", json=payload, headers=get_headers(), timeout=10)
+        
+        if r.status_code in [200, 201]:
+            logger.info(f"Instância {instance_name} criada com sucesso.")
+            return True
+            
+        logger.error(f"Falha ao criar instância: {r.text}")
+        return False
+    except Exception as e:
+        logger.error(f"Erro fatal ao criar instância na Evolution: {e}")
+        return False
+
+# --- ROTA: GERAR QR CODE ---
 @bp.route('/whatsapp/qr', methods=['GET'])
 @jwt_required()
 def get_qr():
-    clinic_id = get_clinic_id()
+    # Identifica o usuário e a clínica
+    identity = get_jwt_identity()
+    clinic_id = 1
+    if isinstance(identity, dict):
+        clinic_id = identity.get("clinic_id", 1)
+    
+    instance_name = get_instance_name(clinic_id)
 
     try:
-        # Tenta conectar no Node real, senão usa fallback
-        try:
-            r = requests.get(f"{WHATSAPP_QR_SERVICE_URL}/qr", timeout=5)
+        # Passo 1: Garante que a Evolution tem uma instância pronta
+        if not ensure_instance(clinic_id):
+            return jsonify({"status": "disconnected", "message": "Falha no motor WhatsApp"}), 500
+
+        # Passo 2: Pede o QR Code para a Evolution
+        connect_url = f"{EVOLUTION_API_URL}/instance/connect/{instance_name}"
+        r = requests.get(connect_url, headers=get_headers(), timeout=10)
+        
+        if r.status_code == 200:
             data = r.json()
-            status = data.get("status", "disconnected")
-            qr_base64 = data.get("qr_base64")
-        except:
+            # A Evolution retorna o base64 do QR Code
+            qr_base64 = data.get('base64')
+            
             status = "disconnected"
-            qr_base64 = None 
-
-        try:
-            conn = WhatsAppConnection.query.filter_by(clinic_id=clinic_id).first()
-            if not conn:
-                conn = WhatsAppConnection(clinic_id=clinic_id, provider="qr")
-                db.session.add(conn)
-
-            conn.status = status
-            conn.session_data = {"provider": "qr", "last_qr": bool(qr_base64)}
-            db.session.commit()
-        except ProgrammingError:
-            db.session.rollback()
+            
+            # Se não veio QR Code, verifica se já está CONECTADO
+            if not qr_base64:
+                state_url = f"{EVOLUTION_API_URL}/instance/connectionState/{instance_name}"
+                r_state = requests.get(state_url, headers=get_headers())
+                if r_state.status_code == 200:
+                    state_data = r_state.json()
+                    # Verifica o estado real da conexão
+                    state = state_data.get('instance', {}).get('state')
+                    if state == 'open':
+                        status = "connected"
+            
             return jsonify({
-                "status": "disconnected", 
-                "qr_base64": None, 
-                "warning": "Tabelas não criadas"
+                "status": status,
+                "qr_base64": qr_base64,
+                "last_update": datetime.utcnow().isoformat()
             }), 200
-
-        return jsonify({
-            "status": status,
-            "qr_base64": qr_base64,
-            "last_update": datetime.utcnow().isoformat()
-        }), 200
-
-    except Exception as e:
-        logger.exception(f"[WHATSAPP] Erro: {e}")
+            
         return jsonify({"status": "disconnected"}), 200
 
-# --- ROTA: SEND MESSAGE ---
+    except Exception as e:
+        logger.exception(f"Erro ao buscar QR Code: {e}")
+        return jsonify({"status": "disconnected", "error": str(e)}), 200
+
+# --- ROTA: ENVIAR MENSAGEM ---
 @bp.route('/whatsapp/send', methods=['POST'])
 @jwt_required()
 def send_message():
-    clinic_id = get_clinic_id()
+    identity = get_jwt_identity()
+    clinic_id = 1
+    if isinstance(identity, dict):
+        clinic_id = identity.get("clinic_id", 1)
+
+    instance_name = get_instance_name(clinic_id)
     body = request.get_json(force=True) or {}
     to = (body.get("to") or "").strip()
     message = (body.get("message") or "").strip()
-    name = body.get("name", "Cliente")
 
     if not to or not message:
-        return jsonify({"ok": False, "message": "Campos obrigatórios faltando"}), 400
+        return jsonify({"ok": False, "message": "Dados incompletos"}), 400
+
+    # Limpa o número (deixa apenas dígitos)
+    phone_number = ''.join(filter(str.isdigit, to)) 
 
     try:
-        contact = WhatsAppContact.query.filter_by(clinic_id=clinic_id, phone=to).first()
-        if not contact:
-            contact = WhatsAppContact(clinic_id=clinic_id, phone=to, name=name, opt_in=True)
-            db.session.add(contact)
-            db.session.commit()
-
-        log = MessageLog(
-            clinic_id=clinic_id,
-            contact_id=contact.id,
-            direction="out",
-            body=message,
-            status="queued"
-        )
-        db.session.add(log)
-        db.session.commit()
-
-        # Simulação de envio se Node estiver off
-        try:
-            requests.post(
-                f"{WHATSAPP_QR_SERVICE_URL}/send",
-                json={"to": to, "message": message, "clinic_id": clinic_id},
-                timeout=5
-            )
-            log.status = "sent"
-        except:
-            log.status = "simulated"
-            contact.last_outbound_at = datetime.utcnow()
+        # Endpoint para enviar texto na Evolution v2
+        send_url = f"{EVOLUTION_API_URL}/message/sendText/{instance_name}"
         
-        db.session.commit()
-        return jsonify({"ok": True, "status": log.status}), 200
+        payload = {
+            "number": phone_number,
+            "options": { "delay": 1200, "presence": "composing" },
+            "textMessage": { "text": message }
+        }
+
+        r = requests.post(send_url, json=payload, headers=get_headers(), timeout=10)
+        
+        # Salva o log no banco de dados do sistema
+        try:
+            contact = WhatsAppContact.query.filter_by(clinic_id=clinic_id, phone=to).first()
+            if not contact:
+                contact = WhatsAppContact(clinic_id=clinic_id, phone=to, name="Cliente", opt_in=True)
+                db.session.add(contact)
+            
+            log_status = "sent" if r.status_code == 201 else "failed"
+            log = MessageLog(
+                clinic_id=clinic_id,
+                contact_id=contact.id,
+                direction="out",
+                body=message,
+                status=log_status
+            )
+            db.session.add(log)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+        if r.status_code == 201:
+            return jsonify({"ok": True, "status": "sent"}), 200
+        else:
+            return jsonify({"ok": False, "message": f"Erro Evolution: {r.text}"}), 400
 
     except Exception as e:
-        db.session.rollback()
+        logger.error(f"Erro envio Evolution: {e}")
         return jsonify({"ok": False, "message": str(e)}), 500
 
-# --- ROTA: WEBHOOK ---
-@bp.route('/whatsapp/webhook-incoming', methods=['POST'])
-def webhook_incoming():
-    # Lógica simplificada para evitar crash se receber payload estranho
-    return jsonify({"ok": True}), 200
-
-# --- ROTA: CONFIG ---
-@bp.route('/whatsapp/recall/config', methods=['POST'])
-@jwt_required()
-def recall_config():
-    return jsonify({"ok": True}), 200
+# --- ROTA: HEALTH CHECK ---
+@bp.route('/whatsapp/health', methods=['GET'])
+def health():
+    return jsonify({"status": "online", "mode": "evolution-api"}), 200
