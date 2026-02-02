@@ -38,7 +38,7 @@ def create_app():
     jwt.init_app(app)
 
     # Importação dos modelos para registro no SQLAlchemy
-    from .models import Clinic, User, Patient, InventoryItem, Lead, Appointment, Transaction, Procedure, MarketingCampaign
+    from .models import Clinic, User, Patient, InventoryItem, Appointment, Transaction
 
     # --- REGISTRO DE BLUEPRINTS ---
     from .routes.auth_routes import auth_bp
@@ -56,8 +56,7 @@ def create_app():
     from .routes.atende_chat_routes import atende_chat_bp
     app.register_blueprint(atende_chat_bp, url_prefix='/api')
 
-    from .routes.marketing_routes import marketing_bp
-    app.register_blueprint(marketing_bp, url_prefix='/api')
+
 
     from .routes.agenda_routes import agenda_bp
     app.register_blueprint(agenda_bp, url_prefix='/api')
@@ -68,8 +67,7 @@ def create_app():
     from .routes.team_routes import team_bp
     app.register_blueprint(team_bp, url_prefix='/api') 
 
-    from .routes.procedure_routes import procedure_bp
-    app.register_blueprint(procedure_bp, url_prefix='/api')
+
 
     # --- ROTAS DE MANUTENÇÃO (REVISADAS) ---
 

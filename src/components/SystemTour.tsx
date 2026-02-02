@@ -7,11 +7,7 @@ const TOUR_STEPS = [
     title: 'Navegação Principal',
     content: 'Aqui você acessa todas as áreas do consultório, desde a Agenda até o Financeiro.',
   },
-  {
-    target: 'marketing-crm',
-    title: 'Captura de Pacientes',
-    content: 'Nesta aba, você gerencia os leads que o robô de IA traz do seu Instagram.',
-  },
+
   {
     target: 'odontograma-3d',
     title: 'Odontograma Digital',

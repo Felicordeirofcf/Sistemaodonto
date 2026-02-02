@@ -2,8 +2,8 @@ import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, Users, Calendar, Stethoscope, 
-  DollarSign, Package, BarChart3, MessageSquare, 
-  LogOut, Target, FlaskConical, ShieldCheck,
+  DollarSign, Package, MessageSquare, 
+  LogOut, ShieldCheck,
   Settings, Rocket, Sparkles
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -37,22 +37,9 @@ export function Sidebar() {
   ];
 
   const adminItems: MenuItem[] = [
-    { 
-      title: 'Marketing & CRM', 
-      icon: Target, 
-      path: '/app/marketing',
-      submenu: [
-        { title: 'Funil de Leads', path: '/app/marketing' },
-        { title: 'Recall de Pacientes', path: '/app/marketing/campanhas' },
-        // Rota de Automação de Anúncios integrada
-        { title: 'OdontoAds (IA)', path: '/app/marketing/automacao' }
-      ]
-    },
     { title: 'Financeiro', icon: DollarSign, path: '/app/financeiro' },
-    { title: 'Dashboard Vendas', icon: BarChart3, path: '/app/dashboard-vendas' },
     { title: 'Estoque', icon: Package, path: '/app/estoque' },
     // Rota unificada com App.tsx
-    { title: 'Fichas Técnicas', icon: FlaskConical, path: '/app/fichas-tecnicas' },
     { title: 'Gestão da Equipe', icon: ShieldCheck, path: '/app/gestao-equipe' },
     { title: 'AtendeChat IA', icon: MessageSquare, path: '/app/atende-chat' },
     { title: 'Configurações', icon: Settings, path: '/app/configuracoes' },

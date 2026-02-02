@@ -197,7 +197,6 @@ export function Financeiro() {
                         <option>Aluguel / Fixos</option>
                         <option>Impostos</option>
                         <option>Comissão</option>
-                        <option>Marketing</option>
                       </>
                     )}
                   </select>

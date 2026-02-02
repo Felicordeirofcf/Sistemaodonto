@@ -6,22 +6,20 @@ import { Loader2, ShieldAlert } from 'lucide-react';
 // --- IMPORTAÇÕES DE PÁGINAS (Garanta que todas usam "export function Nome()") ---
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
-import { DashboardVendas } from './pages/DashboardVendas';
+
 import { Pacientes } from './pages/Pacientes';
 import { Agenda } from './pages/Agenda';
 import { Odontograma } from './pages/Odontograma';
 import { Harmonizacao } from './pages/Harmonizacao';
 import { Financeiro } from './pages/Financeiro';
 import { Estoque } from './pages/Estoque';
-import { ConfigProcedimentos } from './pages/ConfigProcedimentos';
+
 import { GestaoEquipe } from './pages/GestaoEquipe';
 import { AtendeChat } from './pages/AtendeChat';
 import { Configuracoes } from './pages/Configuracoes';
 import { LandingPage } from './pages/LandingPage';
 
-// Importação do Marketing (Atenção: MarketingCRM deve ter "export function MarketingCRM")
-import { MarketingCRM } from './pages/MarketingCRM'; 
-import { MarketingCampaigns } from './pages/MarketingCampaigns'; // Se este arquivo não existir, remova esta linha
+
 
 // --- COMPONENTE DE BLOQUEIO (UI INDUSTRIAL) ---
 const BloqueioPagamento = () => (
@@ -99,21 +97,17 @@ function App() {
               <main className="flex-1 md:ml-64 transition-all duration-300 w-full overflow-x-hidden">
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
-                  <Route path="/dashboard-vendas" element={<DashboardVendas />} />
+                  
                   <Route path="/pacientes" element={<Pacientes />} />
                   <Route path="/agenda" element={<Agenda />} />
                   <Route path="/odontograma" element={<Odontograma />} />
                   <Route path="/harmonizacao" element={<Harmonizacao />} />
                   <Route path="/financeiro" element={<Financeiro />} />
                   <Route path="/estoque" element={<Estoque />} />
-                  <Route path="/fichas-tecnicas" element={<ConfigProcedimentos />} />
+                  
                   <Route path="/gestao-equipe" element={<GestaoEquipe />} />
                   
-                  {/* ROTA PRINCIPAL DO NOVO MARKETING */}
-                  <Route path="/marketing" element={<MarketingCRM />} />
                   
-                  {/* Sub-rota para campanhas (Opcional, se o arquivo existir) */}
-                  <Route path="/marketing/automacao" element={<MarketingCampaigns />} />
                   
                   <Route path="/atende-chat" element={<AtendeChat />} />
                   <Route path="/configuracoes" element={<Configuracoes />} />
