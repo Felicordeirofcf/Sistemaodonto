@@ -22,8 +22,11 @@ def get_headers():
         "Content-Type": "application/json"
     }
 
+# --- AQUI ESTÁ A MUDANÇA PARA DESTRAVAR ---
 def get_instance_name(clinic_id):
-    return f"clinica_{clinic_id}"
+    # Mudamos o nome para fugir da instância travada "clinica_1"
+    # Agora o sistema vai criar "clinica_nova_1" do zero, limpa e sem erros.
+    return f"clinica_nova_{clinic_id}"
 
 # --- FUNÇÃO AUXILIAR: DELETAR INSTÂNCIA TRAVADA ---
 def force_delete_instance(instance_name):
