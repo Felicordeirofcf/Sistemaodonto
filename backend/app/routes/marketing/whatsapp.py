@@ -16,8 +16,7 @@ logger = logging.getLogger(__name__)
 EVOLUTION_API_URL = os.getenv("WHATSAPP_QR_SERVICE_URL", "http://localhost:8080").rstrip("/")
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "minha-senha-secreta")
 
-# --- MEMÓRIA TEMPORÁRIA (Para controlar o tempo) ---
-# Guarda o horário da última tentativa de conexão de cada clínica
+# --- MEMÓRIA TEMPORÁRIA ---
 startup_cooldown = {} 
 
 def get_headers():
@@ -27,36 +26,44 @@ def get_headers():
     }
 
 def get_instance_name(clinic_id):
-    # Mantemos o nome v3 que está funcionando no banco novo
     return f"clinica_v3_{clinic_id}"
 
 # --- FUNÇÃO: GARANTIR QUE A INSTÂNCIA EXISTE ---
 def ensure_instance(clinic_id):
     instance_name = get_instance_name(clinic_id)
     try:
-        # Aumentei o timeout para 30s
         r = requests.get(f"{EVOLUTION_API_URL}/instance/fetchInstances", headers=get_headers(), timeout=30)
         if r.status_code == 200:
             instances = r.json()
-            exists = False
             if isinstance(instances, list):
                 for inst in instances:
-                    if inst.get('name') == instance_name: exists = True
+                    if inst.get('name') == instance_name: return True
             elif isinstance(instances, dict):
-                 if instance_name in instances: exists = True
-            
-            if exists:
-                return True 
+                 if instance_name in instances: return True
 
-        # Se não existe, CRIA (Timeout bem alto aqui, pois criar demora)
         payload = {
             "instanceName": instance_name,
             "token": f"token_{instance_name}",
             "qrcode": True,
             "integration": "WHATSAPP-BAILEYS" 
         }
-        requests.post(f"{EVOLUTION_API_URL}/instance/create", json=payload, headers=get_headers(), timeout=40)
-        return True
+        create_res = requests.post(f"{EVOLUTION_API_URL}/instance/create", json=payload, headers=get_headers(), timeout=40)
+        
+        if create_res.status_code in [200, 201]:
+            # Aplica configurações de performance imediatamente
+            settings_payload = {
+                "reject_call": True,
+                "groupsIgnore": True,
+                "alwaysOnline": True,
+                "readMessages": True,
+                "readStatus": False,
+                "syncFullHistory": False
+            }
+            try:
+                requests.post(f"{EVOLUTION_API_URL}/settings/set/{instance_name}", json=settings_payload, headers=get_headers(), timeout=10)
+            except:
+                pass
+            return True
     except Exception as e:
         logger.error(f"Erro instance: {e}")
         return False
@@ -74,7 +81,6 @@ def get_qr():
     ensure_instance(clinic_id)
 
     try:
-        # 1. TENTA PEGAR O QR CODE (Timeout aumentado)
         qr_code = None
         try:
             r_connect = requests.get(f"{EVOLUTION_API_URL}/instance/connect/{instance_name}", headers=get_headers(), timeout=30)
@@ -84,7 +90,6 @@ def get_qr():
         except:
             pass
 
-        # 2. VERIFICA ESTADO
         state = "close"
         try:
             r_state = requests.get(f"{EVOLUTION_API_URL}/instance/connectionState/{instance_name}", headers=get_headers(), timeout=30)
@@ -97,26 +102,22 @@ def get_qr():
         if state == 'open':
             return jsonify({"status": "connected", "qr_base64": None}), 200
         
-        # Se achou QR Code, retorna ele JÁ!
         if qr_code:
             return jsonify({"status": "disconnected", "qr_base64": qr_code}), 200
 
-        # 3. CONTROLE DE TENTATIVAS (COOLDOWN)
         last_attempt = startup_cooldown.get(instance_name, 0)
         if time.time() - last_attempt < 60:
             return jsonify({"status": "disconnected", "message": "Carregando..."}), 200
 
         startup_cooldown[instance_name] = time.time()
-        # Timeout aumentado na tentativa de conexão
         requests.get(f"{EVOLUTION_API_URL}/instance/connect/{instance_name}", headers=get_headers(), timeout=40)
-        
         return jsonify({"status": "disconnected", "message": "Iniciando..."}), 200
 
     except Exception as e:
         logger.error(f"Erro rota QR: {e}")
         return jsonify({"status": "disconnected"}), 200
 
-# --- ROTA: ENVIAR MENSAGEM (CORRIGIDA) ---
+# --- ROTA: ENVIAR MENSAGEM (CORRIGIDA PARA FORMATO SIMPLES) ---
 @bp.route('/whatsapp/send', methods=['POST'])
 @jwt_required()
 def send_message():
@@ -137,13 +138,17 @@ def send_message():
 
     try:
         send_url = f"{EVOLUTION_API_URL}/message/sendText/{instance_name}"
+        
+        # --- CORREÇÃO AQUI ---
+        # A Evolution estava reclamando que faltava a propriedade "text".
+        # Vamos enviar no formato simplificado que funciona em todas as versões.
         payload = {
             "number": phone_number,
-            "options": { "delay": 1200, "presence": "composing" },
-            "textMessage": { "text": message }
+            "text": message,  # <--- OBRIGATÓRIO NA RAIZ
+            "delay": 1200,
+            "linkPreview": False
         }
 
-        # Timeout aumentado para 40s (Resolve o erro "Read timed out")
         r = requests.post(send_url, json=payload, headers=get_headers(), timeout=40)
         
         try:
@@ -162,8 +167,7 @@ def send_message():
             )
             db.session.add(log)
             db.session.commit()
-        except Exception as db_err:
-            logger.error(f"Erro ao salvar log: {db_err}")
+        except:
             db.session.rollback()
 
         if r.status_code == 201:
