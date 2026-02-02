@@ -6,21 +6,13 @@ type QRStatus = {
   status: "connected" | "disconnected" | "connecting";
   qr_base64?: string;
   last_update?: string;
-  error?: string;
+  warning?: string;
 };
 
 type ApiResult = { ok: boolean; message?: string };
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 const API = (path: string) => `${API_BASE}${path}`;
-
-function authHeaders() {
-  const token = localStorage.getItem("odonto_token"); // ✅ token correto
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-}
 
 export function WhatsAppModulePage() {
   const [qr, setQr] = useState<QRStatus>({ status: "connecting" });
@@ -36,28 +28,29 @@ export function WhatsAppModulePage() {
   const [savingRecall, setSavingRecall] = useState(false);
   const [recallSaved, setRecallSaved] = useState<string | null>(null);
 
-  const [authProblem, setAuthProblem] = useState<string | null>(null);
+  function getHeaders() {
+    const token = localStorage.getItem("odonto_token");
+    return {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  }
 
   async function fetchQR() {
-    setAuthProblem(null);
-
     try {
       setLoadingQR(true);
+      const res = await fetch(API("/api/marketing/whatsapp/qr"), { headers: getHeaders() });
 
-      const res = await fetch(API("/api/marketing/whatsapp/qr"), {
-        headers: authHeaders(),
-      });
-
-      if (res.status === 401 || res.status === 422) {
-        setAuthProblem("Sua sessão expirou ou você não está autenticado. Faça login novamente.");
-        setQr({ status: "disconnected" });
+      if (!res.ok) {
+        const txt = await res.text();
+        setQr({ status: "disconnected", warning: `Erro ${res.status}: ${txt}` });
         return;
       }
 
       const data = await res.json();
       setQr(data);
-    } catch {
-      setQr({ status: "disconnected", error: "Falha de rede ao buscar QR." });
+    } catch (e: any) {
+      setQr({ status: "disconnected", warning: "Falha de rede ao buscar QR." });
     } finally {
       setLoadingQR(false);
     }
@@ -65,23 +58,19 @@ export function WhatsAppModulePage() {
 
   async function sendTest() {
     setSendResult(null);
-    setAuthProblem(null);
     setSending(true);
-
     try {
       const res = await fetch(API("/api/marketing/whatsapp/send"), {
         method: "POST",
-        headers: authHeaders(),
+        headers: getHeaders(),
         body: JSON.stringify({ to, message: msg }),
       });
 
-      if (res.status === 401 || res.status === 422) {
-        setAuthProblem("Sua sessão expirou ou você não está autenticado. Faça login novamente.");
-        setSendResult({ ok: false, message: "Não autenticado" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSendResult({ ok: false, message: data?.message || `Erro ${res.status}` });
         return;
       }
-
-      const data = await res.json();
       setSendResult(data);
     } catch {
       setSendResult({ ok: false, message: "Falha ao enviar." });
@@ -93,23 +82,14 @@ export function WhatsAppModulePage() {
   async function saveRecallConfig() {
     setSavingRecall(true);
     setRecallSaved(null);
-    setAuthProblem(null);
-
     try {
       const res = await fetch(API("/api/marketing/whatsapp/recall/config"), {
         method: "POST",
-        headers: authHeaders(),
+        headers: getHeaders(),
         body: JSON.stringify({ days: recallDays, hour: recallHour }),
       });
-
-      if (res.status === 401 || res.status === 422) {
-        setAuthProblem("Sua sessão expirou ou você não está autenticado. Faça login novamente.");
-        setRecallSaved("Não autenticado");
-        return;
-      }
-
-      const data = await res.json();
-      setRecallSaved(data?.ok ? "Configuração salva ✅" : data?.message || "Erro ao salvar");
+      const data = await res.json().catch(() => ({}));
+      setRecallSaved(res.ok && data?.ok ? "Configuração salva ✅" : data?.message || "Erro ao salvar");
     } catch {
       setRecallSaved("Erro ao salvar");
     } finally {
@@ -144,20 +124,13 @@ export function WhatsAppModulePage() {
           </button>
         </div>
 
-        {authProblem && (
-          <div className="mt-4 rounded-xl border border-yellow-800 bg-yellow-900/20 p-3 text-sm text-yellow-200">
-            {authProblem}
-          </div>
-        )}
-
-        {qr?.error && (
-          <div className="mt-4 rounded-xl border border-rose-800 bg-rose-900/20 p-3 text-sm text-rose-200">
-            {qr.error}
+        {qr.warning && (
+          <div className="mt-4 rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
+            {qr.warning}
           </div>
         )}
 
         <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
-          {/* STATUS + QR */}
           <div className="rounded-2xl border border-slate-800 bg-[#0B1220] p-4 lg:col-span-1">
             <div className="flex items-center gap-2">
               <PlugZap size={18} className="text-[#2D6BFF]" />
@@ -205,15 +178,8 @@ export function WhatsAppModulePage() {
                 </div>
               </div>
             )}
-
-            {qr.status === "connected" && (
-              <div className="mt-4 rounded-xl border border-slate-800 bg-[#0F1A2B] p-3 text-sm text-slate-200">
-                Conectado ✅ Você já pode enviar mensagens.
-              </div>
-            )}
           </div>
 
-          {/* ENVIO TESTE */}
           <div className="rounded-2xl border border-slate-800 bg-[#0B1220] p-4 lg:col-span-2">
             <h2 className="text-base font-semibold">Envio de teste</h2>
             <p className="mt-1 text-xs text-slate-400">Use número no formato internacional (ex.: 55DDDNUMERO).</p>
@@ -258,12 +224,9 @@ export function WhatsAppModulePage() {
             </div>
           </div>
 
-          {/* CONFIG RECALL */}
           <div className="rounded-2xl border border-slate-800 bg-[#0B1220] p-4 lg:col-span-3">
             <h2 className="text-base font-semibold">Recall automático (reativação)</h2>
-            <p className="mt-1 text-xs text-slate-400">
-              Ex.: após 30 dias sem interação, mandar uma mensagem para captar retorno.
-            </p>
+            <p className="mt-1 text-xs text-slate-400">Ex.: após 30 dias sem interação, mandar uma mensagem para captar retorno.</p>
 
             <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-6">
               <div className="lg:col-span-2">
