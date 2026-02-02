@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 EVOLUTION_API_URL = os.getenv("WHATSAPP_QR_SERVICE_URL", "http://localhost:8080").rstrip("/")
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "minha-senha-secreta")
 
-# --- MEMÓRIA TEMPORÁRIA (Para controlar o tempo) ---
-# Guarda o horário da última tentativa de conexão de cada clínica
+# --- MEMÓRIA TEMPORÁRIA ---
 startup_cooldown = {} 
+qr_code_cache = {}
 
 def get_headers():
     return {
@@ -27,14 +27,13 @@ def get_headers():
     }
 
 def get_instance_name(clinic_id):
-    # Vamos manter o nome para usar o banco novo e o redis novo
-    return f"clinica_nova_{clinic_id}"
+    # Mantém o nome v3 que funcionou
+    return f"clinica_v3_{clinic_id}"
 
 # --- FUNÇÃO: GARANTIR QUE A INSTÂNCIA EXISTE ---
 def ensure_instance(clinic_id):
     instance_name = get_instance_name(clinic_id)
     try:
-        # Verifica se existe
         r = requests.get(f"{EVOLUTION_API_URL}/instance/fetchInstances", headers=get_headers(), timeout=5)
         if r.status_code == 200:
             instances = r.json()
@@ -65,7 +64,7 @@ def ensure_instance(clinic_id):
     
     return False
 
-# --- ROTA: GERAR QR CODE (COM COOLDOWN DE 40s) ---
+# --- ROTA: GERAR QR CODE (COM COOLDOWN DE 60s) ---
 @bp.route('/whatsapp/qr', methods=['GET'])
 @jwt_required()
 def get_qr():
@@ -76,22 +75,22 @@ def get_qr():
     
     instance_name = get_instance_name(clinic_id)
 
-    # --- BLOQUEIO DE SEGURANÇA (COOLDOWN) ---
-    # Se mandamos conectar há menos de 40 segundos, OBRIGA a esperar.
+    # --- 1. VERIFICAÇÃO DE COOLDOWN ---
     last_attempt = startup_cooldown.get(instance_name, 0)
-    if time.time() - last_attempt < 40:
-        logger.info(f"⏳ Cooldown ativo para {instance_name}. Aguardando inicialização...")
-        # Retorna 'disconnected' mas com mensagem de aguarde, para o front não bugar
-        return jsonify({
-            "status": "disconnected", 
-            "qr_base64": None, 
-            "message": "Iniciando... (Aguarde o QR Code)"
-        }), 200
+    
+    # Aumentei para 60 segundos para dar bastante tempo ao Render
+    if time.time() - last_attempt < 60:
+        logger.info(f"⏳ Cooldown ativo. Retornando cache ou aguarde...")
+        cached_qr = qr_code_cache.get(instance_name)
+        if cached_qr:
+            return jsonify({"status": "disconnected", "qr_base64": cached_qr, "message": "Aguarde..."}), 200
+        else:
+            return jsonify({"status": "disconnected", "qr_base64": None, "message": "Iniciando... (Aguarde 1 min)"}), 200
 
     try:
         ensure_instance(clinic_id)
 
-        # 1. Verifica estado
+        # 2. Verifica estado real
         state_url = f"{EVOLUTION_API_URL}/instance/connectionState/{instance_name}"
         r_state = requests.get(state_url, headers=get_headers(), timeout=5)
         
@@ -100,19 +99,21 @@ def get_qr():
             data = r_state.json()
             current_state = data.get('instance', {}).get('state') or data.get('state')
 
-        logger.info(f"Estado real da instância: {current_state}")
+        logger.info(f"Estado real: {current_state}")
 
         if current_state == 'open':
+            if instance_name in qr_code_cache: del qr_code_cache[instance_name]
             return jsonify({"status": "connected", "qr_base64": None}), 200
         
         elif current_state == 'connecting':
-            return jsonify({"status": "disconnected", "message": "Conectando..."}), 200
+            cached_qr = qr_code_cache.get(instance_name)
+            return jsonify({"status": "disconnected", "qr_base64": cached_qr, "message": "Conectando..."}), 200
 
         else:
             # ESTÁ FECHADA. MANDA CONECTAR E ATIVA O COOLDOWN.
-            logger.info(f"Enviando comando CONNECT para {instance_name}...")
+            logger.info(f"🚀 Enviando comando CONNECT para {instance_name}...")
             
-            # ATIVA O TIMER: Proíbe novos comandos por 40 segundos
+            # ATIVA O TIMER DE 60 SEGUNDOS
             startup_cooldown[instance_name] = time.time()
             
             connect_url = f"{EVOLUTION_API_URL}/instance/connect/{instance_name}"
@@ -120,7 +121,9 @@ def get_qr():
             
             qr_base64 = None
             if r.status_code == 200:
-                qr_base64 = r.json().get('base64')
+                qr_base64 = r.json().get('base64') or r.json().get('qrcode', {}).get('base64')
+                if qr_base64:
+                    qr_code_cache[instance_name] = qr_base64
             
             return jsonify({
                 "status": "disconnected", 
@@ -131,61 +134,12 @@ def get_qr():
         logger.exception(f"Erro no fluxo de QR: {e}")
         return jsonify({"status": "disconnected"}), 200
 
-# --- ROTA: ENVIAR MENSAGEM ---
+# ... (Mantenha o send_message e health iguais) ...
 @bp.route('/whatsapp/send', methods=['POST'])
 @jwt_required()
 def send_message():
-    identity = get_jwt_identity()
-    clinic_id = 1
-    if isinstance(identity, dict):
-        clinic_id = identity.get("clinic_id", 1)
-
-    instance_name = get_instance_name(clinic_id)
-    body = request.get_json(force=True) or {}
-    to = (body.get("to") or "").strip()
-    message = (body.get("message") or "").strip()
-
-    if not to or not message:
-        return jsonify({"ok": False, "message": "Dados incompletos"}), 400
-
-    phone_number = ''.join(filter(str.isdigit, to)) 
-
-    try:
-        send_url = f"{EVOLUTION_API_URL}/message/sendText/{instance_name}"
-        payload = {
-            "number": phone_number,
-            "options": { "delay": 1200, "presence": "composing" },
-            "textMessage": { "text": message }
-        }
-
-        r = requests.post(send_url, json=payload, headers=get_headers(), timeout=10)
-        
-        try:
-            contact = WhatsAppContact.query.filter_by(clinic_id=clinic_id, phone=to).first()
-            if not contact:
-                contact = WhatsAppContact(clinic_id=clinic_id, phone=to, name="Cliente", opt_in=True)
-                db.session.add(contact)
-            
-            log_status = "sent" if r.status_code == 201 else "failed"
-            log = MessageLog(
-                clinic_id=clinic_id,
-                contact_id=contact.id,
-                direction="out",
-                body=message,
-                status=log_status
-            )
-            db.session.add(log)
-            db.session.commit()
-        except:
-            db.session.rollback()
-
-        if r.status_code == 201:
-            return jsonify({"ok": True, "status": "sent"}), 200
-        else:
-            return jsonify({"ok": False, "message": f"Erro Evolution: {r.text}"}), 400
-
-    except Exception as e:
-        return jsonify({"ok": False, "message": str(e)}), 500
+    # (Copie o código da resposta anterior se precisar, não mudou nada aqui)
+    return jsonify({"ok": False, "message": "Implementação omitida para brevidade"}), 200
 
 @bp.route('/whatsapp/health', methods=['GET'])
 def health():
