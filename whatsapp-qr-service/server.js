@@ -1,7 +1,8 @@
 // whatsapp-qr-service/server.js
 import express from "express";
 import qrcode from "qrcode";
-import { Client, LocalAuth } from "whatsapp-web.js";
+import pkg from "whatsapp-web.js";
+const { Client, LocalAuth } = pkg;
 
 const app = express();
 app.use(express.json());
@@ -17,22 +18,17 @@ app.use((req, res, next) => {
 
 const PORT = process.env.PORT || 3333;
 
-// URL do seu backend Flask para receber mensagens que chegarem no WhatsApp
 const FLASK_WEBHOOK_URL =
   process.env.FLASK_WEBHOOK_URL ||
   "http://localhost:5000/api/marketing/whatsapp/webhook-incoming";
 
 const INTERNAL_WEBHOOK_SECRET = process.env.INTERNAL_WEBHOOK_SECRET || "dev_secret";
-
-// No seu caso: 1 clínica
 const CLINIC_ID = Number(process.env.CLINIC_ID || 1);
 
-// ===== Estado do serviço =====
-let status = "connecting"; // connected | connecting | disconnected
+let status = "connecting";
 let lastQRBase64 = null;
 let lastError = null;
 
-// ===== Inicializa WhatsApp Web =====
 const client = new Client({
   authStrategy: new LocalAuth({ clientId: `clinic-${CLINIC_ID}` }),
   puppeteer: {
@@ -79,7 +75,6 @@ client.on("disconnected", (reason) => {
   console.log("⚠️ disconnected:", reason);
 });
 
-// Helper: POST simples sem node-fetch
 async function postJSON(url, data, headers = {}) {
   try {
     const resp = await fetch(url, {
@@ -87,31 +82,26 @@ async function postJSON(url, data, headers = {}) {
       headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(data)
     });
-    // não quebra se response não for json
     return { ok: resp.ok, status: resp.status };
-  } catch (e) {
+  } catch {
     return { ok: false, status: 0 };
   }
 }
 
-// Quando chega mensagem no WhatsApp
 client.on("message", async (message) => {
   try {
     const from = (message.from || "").replace("@c.us", "");
     const body = message.body || "";
 
-    // encaminha pro Flask (não trava se falhar)
     await postJSON(
       FLASK_WEBHOOK_URL,
       { clinic_id: CLINIC_ID, from, body, timestamp: Date.now() },
       { "X-Internal-Secret": INTERNAL_WEBHOOK_SECRET }
     );
-  } catch (e) {
+  } catch {
     // silencioso no MVP
   }
 });
-
-// ===== Rotas HTTP do serviço =====
 
 app.get("/health", (req, res) => {
   res.json({
@@ -142,20 +132,17 @@ app.post("/send", async (req, res) => {
   }
 
   try {
-    // whatsapp-web.js usa formato: 55dddnumero@c.us
     const chatId = `${String(to).trim()}@c.us`;
     await client.sendMessage(chatId, String(message));
     return res.json({ ok: true });
-  } catch (e) {
+  } catch {
     return res.status(500).json({ ok: false, message: "Falha ao enviar" });
   }
 });
 
-// Start
 app.listen(PORT, () => {
   console.log(`🚀 WhatsApp QR Service rodando na porta ${PORT}`);
   console.log("FLASK_WEBHOOK_URL:", FLASK_WEBHOOK_URL);
 });
 
-// Inicializa o client
 client.initialize();
