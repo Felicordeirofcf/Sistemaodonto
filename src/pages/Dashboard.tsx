@@ -6,7 +6,8 @@ import {
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
 } from 'recharts';
-import { SystemTour } from '../components/SystemTour'; // Importando o componente que criamos
+// Se ainda não tiver o SystemTour, comente a linha abaixo para evitar erros
+// import { SystemTour } from '../components/SystemTour'; 
 
 interface DashboardStats {
   patients: number;
@@ -25,9 +26,8 @@ export function Dashboard() {
     net_profit: 0
   });
   const [loading, setLoading] = useState(true);
-  const [showTour, setShowTour] = useState(false);
-
-  // Dados do gráfico (Integrados com o estilo do Seed)
+  
+  // Exemplo de dados para o gráfico (pode vir do backend futuramente)
   const data = [
     { name: 'Seg', valor: 4000 },
     { name: 'Ter', valor: 3000 },
@@ -39,21 +39,23 @@ export function Dashboard() {
 
   useEffect(() => {
     const token = localStorage.getItem('odonto_token');
-    if (token) {
-      fetch('/api/dashboard/stats', {
-          headers: { 'Authorization': `Bearer ${token}` }
+    
+    // Busca dados reais do Backend
+    fetch('/api/dashboard/stats', {
+        headers: { 'Authorization': `Bearer ${token}` }
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Erro ao carregar dados');
+        return res.json();
       })
-        .then(res => res.json())
-        .then(data => {
-          setStats(data);
-          // GATILHO DO TUTORIAL: Se for o primeiro login
-          if (!localStorage.getItem('odonto_tour_seen')) {
-            setShowTour(true);
-          }
-        })
-        .catch(err => console.error("Erro ao carregar dashboard:", err))
-        .finally(() => setLoading(false));
-    }
+      .then(data => {
+        setStats(data);
+      })
+      .catch(err => {
+        console.error("Usando dados offline:", err);
+        // Mantém zeros ou dados de cache se falhar
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const formatCurrency = (value: number | undefined) => 
@@ -85,28 +87,26 @@ export function Dashboard() {
 
   return (
     <div className="p-8 bg-gray-50 min-h-screen font-sans">
-      {/* COMPONENTE DE TUTORIAL */}
-      {showTour && <SystemTour onComplete={() => {
-        setShowTour(false);
-        localStorage.setItem('odonto_tour_seen', 'true');
-      }} />}
+      
+      {/* Se tiver o componente SystemTour, descomente abaixo */}
+      {/* <SystemTour /> */}
 
-      <header className="mb-10 flex justify-between items-end">
+      <header className="mb-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
           <h1 className="text-4xl font-black text-gray-900 tracking-tight">Visão Geral</h1>
-          <p className="text-gray-500 font-medium mt-1 italic">Bem-vindo ao centro de comando, Dr. Ricardo.</p>
+          <p className="text-gray-500 font-medium mt-1 italic">Bem-vindo ao centro de comando.</p>
         </div>
         <div className="flex items-center gap-2 bg-blue-50 text-blue-600 px-4 py-2 rounded-2xl border border-blue-100 font-black text-[10px] uppercase tracking-widest">
           <Sparkles size={14} /> Sistema Inteligente Ativo
         </div>
       </header>
 
-      {/* KPI Cards com ID para o Tour */}
+      {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
-        <Card title="Pacientes Ativos" value={stats.patients} icon={Users} color="bg-blue-600" trend={+12} />
-        <Card title="Faturamento/Dia" value={formatCurrency(stats.revenue)} icon={DollarSign} color="bg-green-600" trend={+15} />
-        <Card id="estoque-alertas" title="Atenção Estoque" value={stats.low_stock} icon={Activity} color="bg-red-600" />
-        <Card title="Tratamentos/Hoje" value={stats.appointments} icon={Clock} color="bg-purple-600" />
+        <Card title="Pacientes Totais" value={stats.patients} icon={Users} color="bg-blue-600" trend={+12} />
+        <Card title="Receita Total" value={formatCurrency(stats.revenue)} icon={DollarSign} color="bg-green-600" trend={+15} />
+        <Card id="estoque-alertas" title="Estoque Baixo" value={stats.low_stock} icon={Activity} color="bg-red-600" />
+        <Card title="Consultas Hoje" value={stats.appointments} icon={Clock} color="bg-purple-600" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
@@ -120,7 +120,8 @@ export function Dashboard() {
             </div>
           </div>
           
-          <div className="h-80 w-full min-h-[320px]">
+          {/* CORREÇÃO AQUI: Style inline garante altura para o Recharts não quebrar */}
+          <div style={{ width: '100%', height: 320 }}>
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={data}>
                 <defs>
@@ -142,7 +143,7 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* Próximas Consultas - Integrado com o Seed */}
+        {/* Fila de Espera (Mock) */}
         <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 flex flex-col">
           <h2 className="text-xl font-black text-gray-800 mb-6 tracking-tight">Fila de Espera</h2>
           <div className="space-y-6 flex-1">
@@ -166,7 +167,7 @@ export function Dashboard() {
               ))}
           </div>
           <button className="w-full mt-8 py-4 rounded-2xl bg-gray-900 text-white font-black text-[10px] uppercase tracking-[0.2em] hover:bg-black transition-colors shadow-lg shadow-gray-200">
-            Gerenciar Agenda Completa
+            Gerenciar Agenda
           </button>
         </div>
       </div>

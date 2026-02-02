@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify
 from app.models import db, Patient, InventoryItem, Transaction, User, Appointment
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from datetime import datetime
+from datetime import datetime, time
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
@@ -9,7 +9,6 @@ dashboard_bp = Blueprint('dashboard', __name__)
 @jwt_required()
 def get_stats():
     try:
-        # Busca segura do usuário para garantir a clínica correta pós-reset
         user_id = get_jwt_identity()
         user = User.query.get(user_id)
         if not user:
@@ -17,34 +16,34 @@ def get_stats():
             
         current_clinic_id = user.clinic_id
         
-        # 1. Estatísticas Básicas
+        # 1. Pacientes Totais
         total_patients = Patient.query.filter_by(clinic_id=current_clinic_id).count() or 0
         
-        # Coalesce garante que se min_stock for NULL, ele use 0 para a comparação
+        # 2. Estoque Baixo (CORREÇÃO: min_quantity em vez de min_stock)
         low_stock_count = InventoryItem.query.filter(
             InventoryItem.clinic_id == current_clinic_id,
-            InventoryItem.quantity <= db.func.coalesce(InventoryItem.min_stock, 0)
+            InventoryItem.quantity <= db.func.coalesce(InventoryItem.min_quantity, 0)
         ).count() or 0
         
-        # 2. Financeiro do Dia
-        hoje = datetime.utcnow().date()
+        # 3. Financeiro do Dia (Intervalo de Data Seguro para PostgreSQL)
+        today_start = datetime.combine(datetime.utcnow().date(), time.min)
+        today_end = datetime.combine(datetime.utcnow().date(), time.max)
+        
         transacoes_hoje = Transaction.query.filter(
             Transaction.clinic_id == current_clinic_id,
-            db.func.date(Transaction.date) == hoje
+            Transaction.date >= today_start,
+            Transaction.date <= today_end
         ).all()
         
-        # Somas seguras tratando explicitamente tipos para o Frontend
         faturamento_dia = sum(float(t.amount or 0.0) for t in transacoes_hoje if t.type == 'income')
-        
-        # Nota: 'cost' não existe no modelo Transaction simplificado, removendo cálculo de lucro baseado em cost
-        # Se o usuário quiser lucro, precisaria de uma lógica de despesas (type == 'expense')
         despesas_dia = sum(float(t.amount or 0.0) for t in transacoes_hoje if t.type == 'expense')
         lucro_dia = faturamento_dia - despesas_dia
         
-        # 3. Consultas do dia
+        # 4. Consultas do dia
         agendamentos_hoje = Appointment.query.filter(
             Appointment.clinic_id == current_clinic_id,
-            db.func.date(Appointment.date_time) == hoje
+            Appointment.date_time >= today_start,
+            Appointment.date_time <= today_end
         ).count() or 0
 
         return jsonify({
@@ -56,6 +55,5 @@ def get_stats():
         }), 200
 
     except Exception as e:
-        # Log detalhado para o Render
-        print(f"ERRO CRÍTICO DASHBOARD: {str(e)}")
-        return jsonify({'error': 'Erro ao carregar indicadores do painel'}), 500
+        print(f"ERRO CRÍTICO DASHBOARD: {str(e)}") # Aparecerá no log do Render
+        return jsonify({'error': 'Erro ao carregar indicadores'}), 500

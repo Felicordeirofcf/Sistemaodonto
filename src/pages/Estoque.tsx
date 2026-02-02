@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Package, Plus, Minus, AlertTriangle, Search, X } from 'lucide-react';
+import { Package, Plus, Minus, AlertTriangle, Search, X, Loader2, Trash2 } from 'lucide-react';
 
 interface ItemEstoque {
   id: number;
@@ -21,38 +21,36 @@ export function Estoque() {
     nome: '', categoria: 'Material', quantidade: 0, minimo: 5, unidade: 'un' 
   });
 
-  // Helper para pegar o token
   const getToken = () => localStorage.getItem('odonto_token');
 
   // 1. CARREGAR DADOS
   const carregarEstoque = () => {
     const token = getToken();
     fetch('/api/stock', {
-        headers: { 'Authorization': `Bearer ${token}` } // <--- Token Adicionado
+        headers: { 'Authorization': `Bearer ${token}` }
     })
       .then(res => {
-          if (res.status === 401) return []; // Se não autorizado, retorna vazio
+          if (!res.ok) throw new Error('Falha na requisição');
           return res.json();
       })
       .then(data => {
         setItens(Array.isArray(data) ? data : []);
-        setLoading(false);
       })
       .catch(err => {
           console.error(err);
-          setLoading(false);
-      });
+      })
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => {
     carregarEstoque();
   }, []);
 
-  // 2. ATUALIZAR QUANTIDADE (+ ou -)
+  // 2. ATUALIZAR QUANTIDADE
   const ajustarEstoque = async (id: number, delta: number) => {
     const token = getToken();
 
-    // Atualiza visualmente na hora (Otimista)
+    // Atualiza visualmente (Otimista)
     setItens(prev => prev.map(item => {
       if (item.id === id) {
         return { ...item, quantidade: Math.max(0, item.quantidade + delta) };
@@ -60,9 +58,7 @@ export function Estoque() {
       return item;
     }));
 
-    // Envia para o servidor
     try {
-        // CORREÇÃO: URL Relativa e Token
         await fetch(`/api/stock/${id}/update`, {
             method: 'PUT',
             headers: { 
@@ -72,9 +68,8 @@ export function Estoque() {
             body: JSON.stringify({ delta })
         });
     } catch (error) {
-        console.error("Erro ao atualizar estoque", error);
-        // Opcional: Reverter estado visual em caso de erro
-        carregarEstoque(); 
+        console.error("Erro ao sincronizar estoque", error);
+        carregarEstoque(); // Reverte em caso de erro
     }
   };
 
@@ -88,25 +83,41 @@ export function Estoque() {
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}` // <--- Token Adicionado
+                'Authorization': `Bearer ${token}`
             },
             body: JSON.stringify(novoItem)
         });
 
         if (response.ok) {
-            alert('Item adicionado com sucesso!');
+            alert('Item adicionado!');
             setIsModalOpen(false);
             setNovoItem({ nome: '', categoria: 'Material', quantidade: 0, minimo: 5, unidade: 'un' });
             carregarEstoque();
         } else {
-            alert('Erro ao adicionar item.');
+            alert('Erro ao salvar item. Verifique os dados.');
         }
     } catch (error) {
         alert('Erro de conexão.');
     }
   };
 
-  const itensFiltrados = itens.filter(i => i.nome.toLowerCase().includes(busca.toLowerCase()));
+  // 4. DELETAR ITEM (Função Extra)
+  const deletarItem = async (id: number) => {
+      if(!confirm("Tem certeza que deseja excluir este item?")) return;
+      
+      const token = getToken();
+      try {
+          await fetch(`/api/stock/${id}`, {
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${token}` }
+          });
+          setItens(prev => prev.filter(i => i.id !== id));
+      } catch (error) {
+          alert("Erro ao excluir");
+      }
+  }
+
+  const itensFiltrados = itens.filter(i => i.nome && i.nome.toLowerCase().includes(busca.toLowerCase()));
   const itensCriticos = itens.filter(i => i.quantidade <= i.minimo).length;
 
   return (
@@ -121,24 +132,24 @@ export function Estoque() {
               <button onClick={() => setIsModalOpen(false)}><X className="text-gray-400 hover:text-red-500"/></button>
             </div>
             <form onSubmit={handleSalvar} className="space-y-3">
-              <input required placeholder="Nome do Item" className="w-full p-2 border border-gray-200 rounded-lg" value={novoItem.nome} onChange={e => setNovoItem({...novoItem, nome: e.target.value})} />
+              <input required placeholder="Nome do Item" className="w-full p-2 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" value={novoItem.nome} onChange={e => setNovoItem({...novoItem, nome: e.target.value})} />
               <div className="flex gap-2">
-                <select className="p-2 border border-gray-200 rounded-lg flex-1" value={novoItem.categoria} onChange={e => setNovoItem({...novoItem, categoria: e.target.value})}>
+                <select className="p-2 border border-gray-200 rounded-lg flex-1 outline-none" value={novoItem.categoria} onChange={e => setNovoItem({...novoItem, categoria: e.target.value})}>
                   <option>Material</option>
                   <option>Medicamento</option>
                   <option>Descartável</option>
                   <option>Instrumental</option>
                 </select>
-                <input placeholder="Unid (ex: cx)" className="w-20 p-2 border border-gray-200 rounded-lg" value={novoItem.unidade} onChange={e => setNovoItem({...novoItem, unidade: e.target.value})} />
+                <input placeholder="Unid (ex: cx)" className="w-20 p-2 border border-gray-200 rounded-lg outline-none" value={novoItem.unidade} onChange={e => setNovoItem({...novoItem, unidade: e.target.value})} />
               </div>
               <div className="flex gap-2">
                 <div className="flex-1">
                   <label className="text-xs text-gray-500 font-semibold ml-1">Qtd Inicial</label>
-                  <input type="number" className="w-full p-2 border border-gray-200 rounded-lg" value={novoItem.quantidade} onChange={e => setNovoItem({...novoItem, quantidade: parseInt(e.target.value)})} />
+                  <input type="number" className="w-full p-2 border border-gray-200 rounded-lg outline-none" value={novoItem.quantidade} onChange={e => setNovoItem({...novoItem, quantidade: parseInt(e.target.value)})} />
                 </div>
                 <div className="flex-1">
                   <label className="text-xs text-gray-500 font-semibold ml-1">Mínimo (Alerta)</label>
-                  <input type="number" className="w-full p-2 border border-gray-200 rounded-lg" value={novoItem.minimo} onChange={e => setNovoItem({...novoItem, minimo: parseInt(e.target.value)})} />
+                  <input type="number" className="w-full p-2 border border-gray-200 rounded-lg outline-none" value={novoItem.minimo} onChange={e => setNovoItem({...novoItem, minimo: parseInt(e.target.value)})} />
                 </div>
               </div>
               <button className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all mt-2">Salvar Item</button>
@@ -174,7 +185,7 @@ export function Estoque() {
       </div>
 
       {/* TABELA */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden min-h-[300px]">
         <div className="p-4 border-b border-gray-100 flex gap-4 bg-gray-50/50">
           <div className="flex-1 flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-gray-200">
             <Search size={18} className="text-gray-400"/>
@@ -182,7 +193,11 @@ export function Estoque() {
           </div>
         </div>
 
-        {loading ? <div className="p-8 text-center text-gray-400">Carregando estoque...</div> : (
+        {loading ? (
+            <div className="flex flex-col items-center justify-center h-48 text-gray-400">
+                <Loader2 className="animate-spin mb-2" /> Carregando...
+            </div>
+        ) : (
         <table className="w-full text-left">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
@@ -197,7 +212,7 @@ export function Estoque() {
             {itensFiltrados.map((item) => {
               const isLow = item.quantidade <= item.minimo;
               return (
-                <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                <tr key={item.id} className="hover:bg-gray-50 transition-colors group">
                   <td className="p-4">
                     <div className="flex items-center gap-3">
                       <div className="p-2 bg-gray-100 rounded-lg text-gray-500"><Package size={18} /></div>
@@ -221,8 +236,9 @@ export function Estoque() {
                   </td>
                   <td className="p-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => ajustarEstoque(item.id, -1)} className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors"><Minus size={14} /></button>
-                      <button onClick={() => ajustarEstoque(item.id, 1)} className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 hover:bg-green-50 hover:text-green-600 hover:border-green-200 transition-colors"><Plus size={14} /></button>
+                      <button onClick={() => ajustarEstoque(item.id, -1)} className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 hover:bg-red-50 hover:text-red-600 transition-colors"><Minus size={14} /></button>
+                      <button onClick={() => ajustarEstoque(item.id, 1)} className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 hover:bg-green-50 hover:text-green-600 transition-colors"><Plus size={14} /></button>
+                      <button onClick={() => deletarItem(item.id)} className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 hover:bg-red-100 hover:text-red-600 text-gray-300 transition-colors"><Trash2 size={14} /></button>
                     </div>
                   </td>
                 </tr>
