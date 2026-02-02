@@ -4,10 +4,20 @@ import qrcode from "qrcode";
 import pkg from "whatsapp-web.js";
 const { Client, LocalAuth } = pkg;
 
-const app = express();
-app.use(express.json());
+// Se você instalou "puppeteer" (recomendado), ele fornece o Chromium.
+// Isso evita o erro "Could not find Chrome" no Render.
+let puppeteer = null;
+try {
+  puppeteer = await import("puppeteer");
+} catch {
+  // se não tiver puppeteer instalado, o whatsapp-web.js vai tentar usar puppeteer-core
+  // e provavelmente vai falhar no Render por falta de Chrome.
+}
 
-// (Opcional) CORS básico p/ debug
+const app = express();
+app.use(express.json({ limit: "1mb" }));
+
+// CORS básico (debug)
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Internal-Secret");
@@ -16,7 +26,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const PORT = process.env.PORT || 3333;
+const PORT = Number(process.env.PORT || 3333);
 
 const FLASK_WEBHOOK_URL =
   process.env.FLASK_WEBHOOK_URL ||
@@ -25,19 +35,45 @@ const FLASK_WEBHOOK_URL =
 const INTERNAL_WEBHOOK_SECRET = process.env.INTERNAL_WEBHOOK_SECRET || "dev_secret";
 const CLINIC_ID = Number(process.env.CLINIC_ID || 1);
 
-let status = "connecting";
+// Cache dir recomendado no Render (pode ajustar pelo ENV)
+process.env.PUPPETEER_CACHE_DIR =
+  process.env.PUPPETEER_CACHE_DIR || "/opt/render/.cache/puppeteer";
+
+// Se você quiser forçar download no build:
+process.env.PUPPETEER_SKIP_DOWNLOAD = process.env.PUPPETEER_SKIP_DOWNLOAD ?? "false";
+
+let status = "connecting"; // connected | disconnected | connecting
 let lastQRBase64 = null;
 let lastError = null;
+
+function getExecutablePathSafe() {
+  try {
+    if (puppeteer?.executablePath) {
+      return puppeteer.executablePath();
+    }
+  } catch {}
+  return undefined;
+}
+
+const executablePath = getExecutablePathSafe();
+if (executablePath) {
+  console.log("✅ Puppeteer Chromium path:", executablePath);
+} else {
+  console.log("⚠️ Puppeteer executablePath não disponível. Verifique se 'puppeteer' está instalado.");
+}
 
 const client = new Client({
   authStrategy: new LocalAuth({ clientId: `clinic-${CLINIC_ID}` }),
   puppeteer: {
     headless: true,
+    executablePath, // <- chave para Render (quando puppeteer está instalado)
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
-      "--disable-gpu"
+      "--disable-gpu",
+      "--no-zygote",
+      "--single-process"
     ]
   }
 });
@@ -47,8 +83,10 @@ client.on("qr", async (qr) => {
     status = "connecting";
     lastQRBase64 = await qrcode.toDataURL(qr);
     lastError = null;
+    console.log("📲 QR gerado (aguardando scan)...");
   } catch (e) {
     lastError = "Falha ao gerar QR";
+    console.log("❌ Erro ao gerar QR:", e?.message || e);
   }
 });
 
@@ -83,19 +121,30 @@ async function postJSON(url, data, headers = {}) {
       body: JSON.stringify(data)
     });
     return { ok: resp.ok, status: resp.status };
-  } catch {
-    return { ok: false, status: 0 };
+  } catch (e) {
+    return { ok: false, status: 0, error: e?.message || "fetch_failed" };
   }
 }
 
 client.on("message", async (message) => {
   try {
-    const from = (message.from || "").replace("@c.us", "");
+    // message.from pode ser: "551199...@c.us" (contato) ou "xxxxx@g.us" (grupo)
+    const fromRaw = message.from || "";
+    const isGroup = fromRaw.endsWith("@g.us");
+    const from = fromRaw.replace("@c.us", "").replace("@g.us", "");
+
     const body = message.body || "";
 
     await postJSON(
       FLASK_WEBHOOK_URL,
-      { clinic_id: CLINIC_ID, from, body, timestamp: Date.now() },
+      {
+        clinic_id: CLINIC_ID,
+        from,
+        body,
+        is_group: isGroup,
+        raw_from: fromRaw,
+        timestamp: Date.now()
+      },
       { "X-Internal-Secret": INTERNAL_WEBHOOK_SECRET }
     );
   } catch {
@@ -109,7 +158,8 @@ app.get("/health", (req, res) => {
     status,
     clinic_id: CLINIC_ID,
     has_qr: Boolean(lastQRBase64),
-    last_error: lastError
+    last_error: lastError,
+    webhook: FLASK_WEBHOOK_URL
   });
 });
 
@@ -120,6 +170,7 @@ app.get("/qr", (req, res) => {
   });
 });
 
+// Envio para contato (número) ou grupo (id@g.us)
 app.post("/send", async (req, res) => {
   const { to, message } = req.body || {};
 
@@ -132,17 +183,45 @@ app.post("/send", async (req, res) => {
   }
 
   try {
-    const chatId = `${String(to).trim()}@c.us`;
+    const toStr = String(to).trim();
+
+    // Se já vier com @c.us ou @g.us, respeita.
+    const chatId =
+      toStr.endsWith("@c.us") || toStr.endsWith("@g.us")
+        ? toStr
+        : `${toStr}@c.us`;
+
     await client.sendMessage(chatId, String(message));
     return res.json({ ok: true });
-  } catch {
-    return res.status(500).json({ ok: false, message: "Falha ao enviar" });
+  } catch (e) {
+    return res.status(500).json({ ok: false, message: e?.message || "Falha ao enviar" });
+  }
+});
+
+// (Opcional) reset de sessão (use com cuidado)
+app.post("/pairing/reset", async (req, res) => {
+  try {
+    lastQRBase64 = null;
+    lastError = null;
+    status = "connecting";
+
+    // Desconecta / reinicializa
+    try { await client.logout(); } catch {}
+    try { await client.destroy(); } catch {}
+
+    // Recria sessão
+    setTimeout(() => client.initialize(), 1500);
+
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ ok: false, message: e?.message || "Erro ao resetar" });
   }
 });
 
 app.listen(PORT, () => {
   console.log(`🚀 WhatsApp QR Service rodando na porta ${PORT}`);
   console.log("FLASK_WEBHOOK_URL:", FLASK_WEBHOOK_URL);
+  console.log("CLINIC_ID:", CLINIC_ID);
 });
 
 client.initialize();
