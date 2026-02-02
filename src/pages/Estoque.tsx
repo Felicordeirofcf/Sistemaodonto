@@ -101,7 +101,7 @@ export function Estoque() {
     }
   };
 
-  // 4. DELETAR ITEM (Função Extra)
+  // 4. DELETAR ITEM
   const deletarItem = async (id: number) => {
       if(!confirm("Tem certeza que deseja excluir este item?")) return;
       

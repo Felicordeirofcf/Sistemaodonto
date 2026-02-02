@@ -1,4 +1,3 @@
-# backend/app/__init__.py
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -32,12 +31,12 @@ def create_app():
         "pool_recycle": 280,
     }
 
-    # ✅ CORS certo para JWT
+    # ✅ CORS configurado para aceitar requisições do Frontend
     CORS(
         app,
         resources={r"/*": {"origins": "*"}},
         supports_credentials=False,
-        allow_headers=["Content-Type", "Authorization"],
+        allow_headers=["Content-Type", "Authorization", "X-Internal-Secret"],
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     )
 
@@ -45,7 +44,7 @@ def create_app():
     migrate.init_app(app, db)
     jwt.init_app(app)
 
-    # ✅ Importar models pra registrar no metadata (migrate)
+    # ✅ Importar models pra registrar no metadata (Essencial para o reset funcionar)
     from .models import (
         Clinic, User, Patient, InventoryItem, Appointment, Transaction,
         WhatsAppConnection, WhatsAppContact, MessageLog, ScheduledMessage
@@ -76,9 +75,9 @@ def create_app():
     from .routes.team_routes import team_bp
     app.register_blueprint(team_bp, url_prefix="/api")
 
-    # ✅ WhatsApp: NÃO coloque /api aqui se suas rotas já tem /api dentro do arquivo.
+    # ✅ WhatsApp: Sem prefixo aqui, pois já está definido no arquivo whatsapp.py
     from .routes.marketing.whatsapp import bp as marketing_whatsapp_bp
-    app.register_blueprint(marketing_whatsapp_bp)  # <= sem prefixo
+    app.register_blueprint(marketing_whatsapp_bp)
 
 
     # --- ROTAS DE MANUTENÇÃO ---
@@ -86,15 +85,18 @@ def create_app():
     def force_reset():
         confirm = request.args.get("confirm")
         if confirm != "true":
-            return jsonify({"error": "Confirmação necessária"}), 403
+            return jsonify({"error": "Confirmação necessária (?confirm=true)"}), 403
 
         try:
             from sqlalchemy import text
             db.session.remove()
+            # Comando específico para PostgreSQL limpar tudo
             db.session.execute(text("DROP SCHEMA public CASCADE; CREATE SCHEMA public;"))
             db.session.commit()
+            
+            # Recria as tabelas baseadas nos models importados acima
             db.create_all()
-            return jsonify({"message": "Banco resetado com sucesso!"}), 200
+            return jsonify({"message": "Banco resetado com sucesso! Agora rode o seed."}), 200
         except Exception as e:
             db.session.rollback()
             return jsonify({"error": str(e)}), 500
@@ -106,6 +108,7 @@ def create_app():
         from datetime import datetime, timedelta
 
         try:
+            # Garante que as tabelas existem antes de inserir dados
             db.create_all()
 
             if not Clinic.query.filter_by(name="OdontoSys Intelligence Demo").first():
@@ -146,7 +149,7 @@ def create_app():
             return jsonify({"error": str(e)}), 500
 
 
-    # --- SPA ---
+    # --- SPA (Serve o Frontend React) ---
     @app.route("/")
     def index():
         return app.send_static_file("index.html")

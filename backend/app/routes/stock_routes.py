@@ -22,7 +22,7 @@ def get_stock():
                 'nome': i.name,
                 'categoria': i.category,
                 'quantidade': i.quantity,
-                'minimo': i.min_quantity, # Campo correto
+                'minimo': i.min_quantity, # Campo correto no Model
                 'preco_compra': i.purchase_price,
                 'unidade': i.unit
             })
@@ -47,7 +47,7 @@ def create_item():
             name=data.get('nome'),
             category=data.get('categoria', 'Material'),
             quantity=float(data.get('quantidade', 0)),
-            min_quantity=float(data.get('minimo', 5)), # Garante que é float
+            min_quantity=float(data.get('minimo', 5)), # Campo correto
             purchase_price=float(data.get('preco_compra', 0)),
             unit=data.get('unidade', 'un'),
             clinic_id=user.clinic_id

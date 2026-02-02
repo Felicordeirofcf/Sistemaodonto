@@ -1,7 +1,5 @@
-# backend/app/models.py
 from . import db
 from datetime import datetime
-
 
 # =========================================================
 # 1) CLÍNICA (CLIENTE SAAS)
@@ -19,14 +17,14 @@ class Clinic(db.Model):
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Core
+    # Relacionamentos Core
     users = db.relationship("User", backref="clinic", lazy=True)
     patients = db.relationship("Patient", backref="clinic", lazy=True)
     inventory_items = db.relationship("InventoryItem", backref="clinic", lazy=True)
     appointments = db.relationship("Appointment", backref="clinic", lazy=True)
     transactions = db.relationship("Transaction", backref="clinic", lazy=True)
 
-    # WhatsApp / Marketing
+    # Relacionamentos WhatsApp / Marketing
     whatsapp_connections = db.relationship("WhatsAppConnection", backref="clinic", lazy=True)
     whatsapp_contacts = db.relationship("WhatsAppContact", backref="clinic", lazy=True)
     whatsapp_messages = db.relationship("MessageLog", backref="clinic", lazy=True)
@@ -83,8 +81,19 @@ class Patient(db.Model):
     clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # opcional: paciente pode ter vários contatos whatsapp (se necessário)
+    # Paciente pode ter vários contatos whatsapp associados
     whatsapp_contacts = db.relationship("WhatsAppContact", backref="patient", lazy=True)
+    
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "phone": self.phone,
+            "cpf": self.cpf,
+            "email": self.email,
+            "address": self.address,
+            "status": self.status
+        }
 
 
 # =========================================================
@@ -95,12 +104,15 @@ class InventoryItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
     name = db.Column(db.String(100), nullable=False)
-
+    
+    # Adicionado para evitar erro na rota de Estoque que criamos antes
+    category = db.Column(db.String(50), default="Material") 
+    
     quantity = db.Column(db.Float, default=0.0)
-
-    # ✅ IMPORTANTE: seu dashboard usa min_quantity
-    # (antes você tinha min_stock e isso estoura erro)
-    min_quantity = db.Column(db.Float, default=5.0)
+    min_quantity = db.Column(db.Float, default=5.0) # Correção aplicada (era min_stock)
+    
+    # Adicionado para evitar erro na rota de Estoque (cálculo de ROI)
+    purchase_price = db.Column(db.Float, default=0.0) 
 
     unit = db.Column(db.String(20), default="unidade")
 
@@ -123,6 +135,15 @@ class Appointment(db.Model):
     patient_id = db.Column(db.Integer, db.ForeignKey("patients.id"), nullable=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=False)
 
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "date": self.date_time.isoformat(),
+            "patient_name": self.patient_name,
+            "procedure": self.procedure,
+            "status": self.status
+        }
+
 
 # =========================================================
 # 6) FINANCEIRO
@@ -143,7 +164,7 @@ class Transaction(db.Model):
 
 
 # =========================================================
-# 7) WHATSAPP / MARKETING
+# 7) WHATSAPP / MARKETING (NOVOS)
 # =========================================================
 
 class WhatsAppConnection(db.Model):
