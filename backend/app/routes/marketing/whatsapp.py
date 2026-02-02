@@ -22,31 +22,18 @@ def get_headers():
         "Content-Type": "application/json"
     }
 
-# --- AQUI ESTÁ A MUDANÇA PARA DESTRAVAR ---
 def get_instance_name(clinic_id):
-    # Mudamos o nome para fugir da instância travada "clinica_1"
-    # Agora o sistema vai criar "clinica_nova_1" do zero, limpa e sem erros.
-    return f"clinica_nova_{clinic_id}"
+    # Nome final para encerrar a novela
+    return f"clinica_final_{clinic_id}"
 
-# --- FUNÇÃO AUXILIAR: DELETAR INSTÂNCIA TRAVADA ---
-def force_delete_instance(instance_name):
-    try:
-        url = f"{EVOLUTION_API_URL}/instance/delete/{instance_name}"
-        requests.delete(url, headers=get_headers(), timeout=5)
-        logger.warning(f"Instância {instance_name} deletada para limpeza.")
-    except Exception as e:
-        logger.error(f"Erro ao deletar instância: {e}")
-
-# --- FUNÇÃO: GARANTIR INSTÂNCIA ---
+# --- FUNÇÃO: CHECAR E CRIAR INSTÂNCIA ---
 def ensure_instance(clinic_id):
     instance_name = get_instance_name(clinic_id)
-    
-    # 1. Verifica se existe
     try:
+        # Verifica se existe
         r = requests.get(f"{EVOLUTION_API_URL}/instance/fetchInstances", headers=get_headers(), timeout=5)
         if r.status_code == 200:
             instances = r.json()
-            # Verifica se nosso nome está na lista
             exists = False
             if isinstance(instances, list):
                 for inst in instances:
@@ -55,23 +42,9 @@ def ensure_instance(clinic_id):
                  if instance_name in instances: exists = True
             
             if exists:
-                # Se existe, verifica se está "Close" (travada)
-                state_url = f"{EVOLUTION_API_URL}/instance/connectionState/{instance_name}"
-                r_state = requests.get(state_url, headers=get_headers(), timeout=5)
-                if r_state.status_code == 200:
-                    state = r_state.json().get('instance', {}).get('state')
-                    if state == 'close':
-                        # Se está fechada, deleta para recriar do zero
-                        logger.info(f"Instância {instance_name} está fechada (CLOSE). Recriando...")
-                        force_delete_instance(instance_name)
-                        return False # Retorna False para forçar a criação abaixo
-                return True
+                return True # Já existe, tudo certo.
 
-    except Exception as e:
-        logger.error(f"Erro ao checar instância: {e}")
-
-    # 2. Se não existe (ou foi deletada), CRIA
-    try:
+        # Se não existe, CRIA
         payload = {
             "instanceName": instance_name,
             "token": f"token_{instance_name}",
@@ -79,18 +52,16 @@ def ensure_instance(clinic_id):
             "integration": "WHATSAPP-BAILEYS" 
         }
         r = requests.post(f"{EVOLUTION_API_URL}/instance/create", json=payload, headers=get_headers(), timeout=15)
-        
         if r.status_code in [200, 201]:
             logger.info(f"Instância {instance_name} criada com sucesso.")
             return True
-        
-        logger.error(f"Falha ao criar instância: {r.text}")
-        return False
+            
     except Exception as e:
-        logger.error(f"Erro fatal ao criar: {e}")
-        return False
+        logger.error(f"Erro ao garantir instância: {e}")
+    
+    return False
 
-# --- ROTA: GERAR QR CODE ---
+# --- ROTA: GERAR QR CODE (COM PROTEÇÃO ANTI-LOOP) ---
 @bp.route('/whatsapp/qr', methods=['GET'])
 @jwt_required()
 def get_qr():
@@ -102,58 +73,62 @@ def get_qr():
     instance_name = get_instance_name(clinic_id)
 
     try:
-        # Garante que a instância existe
         ensure_instance(clinic_id)
 
-        # Tenta conectar/pegar QR
-        connect_url = f"{EVOLUTION_API_URL}/instance/connect/{instance_name}"
-        r = requests.get(connect_url, headers=get_headers(), timeout=15)
-        
-        qr_base64 = None
-        status = "disconnected"
-
-        if r.status_code == 200:
-            data = r.json()
-            # Tenta pegar o base64
-            qr_base64 = data.get('base64') or data.get('qrcode', {}).get('base64')
-            
-            if qr_base64:
-                logger.info("QR Code recebido com sucesso!")
-                return jsonify({
-                    "status": "disconnected", 
-                    "qr_base64": qr_base64,
-                    "last_update": datetime.utcnow().isoformat()
-                }), 200
-
-        # Se não veio QR, checa se já conectou
+        # 1. PRIMEIRO: Verifica o estado ATUAL antes de mandar conectar
         state_url = f"{EVOLUTION_API_URL}/instance/connectionState/{instance_name}"
         r_state = requests.get(state_url, headers=get_headers(), timeout=5)
         
+        current_state = "close"
         if r_state.status_code == 200:
-            state_data = r_state.json()
-            state = state_data.get('instance', {}).get('state') or state_data.get('state')
-            logger.info(f"Estado da instância: {state}")
-            
-            if state == 'open':
-                status = "connected"
-            elif state == 'connecting':
-                # Se está conectando mas sem QR, espera um pouco
-                status = "disconnected" 
+            data = r_state.json()
+            current_state = data.get('instance', {}).get('state') or data.get('state')
 
-        return jsonify({
-            "status": status,
-            "qr_base64": qr_base64,
-            "last_update": datetime.utcnow().isoformat()
-        }), 200
+        logger.info(f"Estado atual da instância: {current_state}")
+
+        # 2. DECISÃO INTELIGENTE
+        if current_state == 'open':
+            return jsonify({"status": "connected", "qr_base64": None}), 200
+            
+        elif current_state == 'connecting':
+            # SE JÁ ESTÁ CONECTANDO, NÃO FAZ NADA! Só espera.
+            # Tenta buscar o QR Code se já tiver sido gerado
+            connect_url = f"{EVOLUTION_API_URL}/instance/connect/{instance_name}"
+            r_qr = requests.get(connect_url, headers=get_headers(), timeout=10)
+            qr_base64 = None
+            if r_qr.status_code == 200:
+                qr_base64 = r_qr.json().get('base64')
+            
+            return jsonify({
+                "status": "disconnected", 
+                "qr_base64": qr_base64, # Pode ser null se ainda estiver carregando
+                "message": "Iniciando..."
+            }), 200
+
+        else:
+            # SÓ MANDA CONECTAR SE ESTIVER FECHADO (CLOSE)
+            connect_url = f"{EVOLUTION_API_URL}/instance/connect/{instance_name}"
+            r = requests.get(connect_url, headers=get_headers(), timeout=15)
+            
+            qr_base64 = None
+            if r.status_code == 200:
+                qr_base64 = r.json().get('base64')
+            
+            return jsonify({
+                "status": "disconnected", 
+                "qr_base64": qr_base64
+            }), 200
 
     except Exception as e:
         logger.exception(f"Erro no fluxo de QR: {e}")
-        return jsonify({"status": "disconnected", "error": str(e)}), 200
+        return jsonify({"status": "disconnected"}), 200
 
 # --- ROTA: ENVIAR MENSAGEM ---
 @bp.route('/whatsapp/send', methods=['POST'])
 @jwt_required()
 def send_message():
+    # ... (Mantenha o código de envio igual, ele não causa problemas)
+    # Vou replicar aqui para facilitar o copy-paste completo
     identity = get_jwt_identity()
     clinic_id = 1
     if isinstance(identity, dict):
@@ -179,7 +154,6 @@ def send_message():
 
         r = requests.post(send_url, json=payload, headers=get_headers(), timeout=10)
         
-        # Log no banco
         try:
             contact = WhatsAppContact.query.filter_by(clinic_id=clinic_id, phone=to).first()
             if not contact:
