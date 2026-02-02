@@ -78,9 +78,9 @@ def create_app():
     from .routes.team_routes import team_bp
     app.register_blueprint(team_bp, url_prefix="/api")
 
-    # WhatsApp (BP corrigido)
+    # ✅ WhatsApp (CORREÇÃO AQUI): Adicionando url_prefix para bater com o Frontend
     from .routes.marketing.whatsapp import bp as marketing_whatsapp_bp
-    app.register_blueprint(marketing_whatsapp_bp) # Sem prefixo extra
+    app.register_blueprint(marketing_whatsapp_bp, url_prefix="/api/marketing")
 
     # --- ROTAS DE SISTEMA (RESET E SEED) ---
     @app.route("/api/force_reset_db")
