@@ -4,7 +4,8 @@ import {
   LayoutDashboard, Users, Calendar, Stethoscope, 
   DollarSign, Package, MessageSquare, 
   LogOut, ShieldCheck,
-  Settings, Rocket, Sparkles
+  Settings, Sparkles,
+  MessageCircle
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -42,6 +43,10 @@ export function Sidebar() {
     // Rota unificada com App.tsx
     { title: 'Gestão da Equipe', icon: ShieldCheck, path: '/app/gestao-equipe' },
     { title: 'AtendeChat IA', icon: MessageSquare, path: '/app/atende-chat' },
+
+    // ✅ NOVO: WhatsApp (módulo)
+    { title: 'WhatsApp', icon: MessageCircle, path: '/app/whatsapp' },
+
     { title: 'Configurações', icon: Settings, path: '/app/configuracoes' },
   ];
 

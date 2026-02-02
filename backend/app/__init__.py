@@ -33,23 +33,25 @@ def create_app():
     }
 
     # Configuração de CORS para permitir cabeçalhos de autenticação
-    CORS(app, resources={r"/*": {"origins": "*"}}) 
-    
+    CORS(app, resources={r"/*": {"origins": "*"}})
+
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
 
-    # Importação dos modelos
-    from .models import Clinic, User, Patient, InventoryItem, Appointment, Transaction
+    # ✅ Importação dos modelos (incluindo WhatsApp)
+    from .models import (
+        Clinic, User, Patient, InventoryItem, Appointment, Transaction,
+        WhatsAppConnection, WhatsAppContact, MessageLog, ScheduledMessage
+    )
 
     # --- REGISTRO DE BLUEPRINTS ---
-    # Nota: Certifique-se de que as rotas dentro dos Blueprints usem os métodos corretos (POST, GET)
     from .routes.auth_routes import auth_bp
     app.register_blueprint(auth_bp, url_prefix='/auth')
-    
+
     from .routes.patient_routes import patient_bp
     app.register_blueprint(patient_bp, url_prefix='/api')
-    
+
     from .routes.stock_routes import stock_bp
     app.register_blueprint(stock_bp, url_prefix='/api')
 
@@ -66,7 +68,12 @@ def create_app():
     app.register_blueprint(financial_bp, url_prefix='/api')
 
     from .routes.team_routes import team_bp
-    app.register_blueprint(team_bp, url_prefix='/api') 
+    app.register_blueprint(team_bp, url_prefix='/api')
+
+    # ✅ NOVO: WhatsApp Marketing Blueprint
+    from .routes.marketing.whatsapp import bp as marketing_whatsapp_bp
+    app.register_blueprint(marketing_whatsapp_bp, url_prefix='/api')
+
 
     # --- ROTAS DE MANUTENÇÃO ---
 
@@ -75,7 +82,7 @@ def create_app():
         confirm = request.args.get('confirm')
         if confirm != 'true':
             return jsonify({"error": "Confirmação necessária"}), 403
-        
+
         try:
             from sqlalchemy import text
             db.session.remove()
@@ -116,15 +123,16 @@ def create_app():
 
                 # Paciente para teste
                 p1 = Patient(
-                    name="Carlos Eduardo", 
-                    phone="11999999999", 
-                    last_visit=datetime.utcnow() - timedelta(days=240), 
+                    name="Carlos Eduardo",
+                    phone="11999999999",
+                    last_visit=datetime.utcnow() - timedelta(days=240),
                     clinic_id=demo_clinic.id
                 )
                 db.session.add(p1)
-                
+
                 db.session.commit()
                 return jsonify({"message": "Seed finalizado", "user": "admin@odonto.com", "pass": "admin123"}), 200
+
             return jsonify({"message": "Dados já existentes"}), 200
         except Exception as e:
             db.session.rollback()

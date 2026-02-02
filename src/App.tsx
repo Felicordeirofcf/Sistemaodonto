@@ -19,6 +19,8 @@ import { AtendeChat } from './pages/AtendeChat';
 import { Configuracoes } from './pages/Configuracoes';
 import { LandingPage } from './pages/LandingPage';
 
+// ✅ NOVO: Página do módulo WhatsApp
+import { WhatsAppModulePage } from './pages/WhatsAppModulePage';
 
 
 // --- COMPONENTE DE BLOQUEIO (UI INDUSTRIAL) ---
@@ -106,10 +108,12 @@ function App() {
                   <Route path="/estoque" element={<Estoque />} />
                   
                   <Route path="/gestao-equipe" element={<GestaoEquipe />} />
-                  
-                  
-                  
+
                   <Route path="/atende-chat" element={<AtendeChat />} />
+
+                  {/* ✅ NOVO: WhatsApp */}
+                  <Route path="/whatsapp" element={<WhatsAppModulePage />} />
+
                   <Route path="/configuracoes" element={<Configuracoes />} />
                   
                   <Route path="*" element={<Navigate to="/app" replace />} />

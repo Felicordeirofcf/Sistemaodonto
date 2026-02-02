@@ -1,27 +1,49 @@
 #!/usr/bin/env bash
-# exit on error
 set -o errexit
 
 echo "🚀 Iniciando processo de Build Industrial..."
 
-# 1. Instalar dependências do Backend (Python)
+# =========================================
+# 1) Backend (Python)
+# =========================================
 echo "🐍 Instalando dependências do Python..."
-pip install --upgrade pip
+python -m pip install --upgrade pip
 pip install -r backend/requirements.txt
 
-# 2. Instalar dependências do Frontend (Node) e Buildar
-echo "📦 Instalando e buildando o Frontend (Vite/React)..."
-npm install
+# =========================================
+# 2) Frontend (Vite/React)
+# =========================================
+echo "📦 Instalando dependências do Frontend (Vite/React)..."
+
+if [ -f package-lock.json ]; then
+  echo "🔒 package-lock.json encontrado → usando npm ci (build mais estável)"
+  npm ci
+else
+  echo "ℹ️ package-lock.json não encontrado → usando npm install"
+  npm install
+fi
+
+echo "🏗️ Buildando o Frontend..."
 npm run build
 
-# 3. Organizar os arquivos estáticos para o Flask
+# =========================================
+# 3) Publicar estáticos para o Flask
+# =========================================
 echo "🚚 Limpando e movendo build para o diretório static..."
+
+# onde o Flask vai servir os arquivos
 mkdir -p backend/app/static
 
-# Limpeza seletiva para evitar problemas de concorrência no Render
+# limpa com segurança
 find backend/app/static -mindepth 1 -delete
 
-# Copia o build final
-cp -r dist/* backend/app/static/
+# valida se dist existe
+if [ ! -d "dist" ]; then
+  echo "❌ Pasta dist não encontrada. Build do frontend falhou."
+  exit 1
+fi
+
+# copia tudo do dist (inclui index.html e assets)
+cp -R dist/. backend/app/static/
 
 echo "✅ Build finalizado com sucesso! Pronto para o deploy."
