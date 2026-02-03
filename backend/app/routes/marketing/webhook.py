@@ -1,131 +1,123 @@
 from flask import Blueprint, request, jsonify
-from app.models import db, Lead, Campaign, Patient, LeadStatus, LeadEvent
-from datetime import datetime
-import re
-import requests
-import os
+from app.models import db, Clinic, CRMStage, CRMCard, Lead, WhatsAppConnection
+import logging
+import datetime
+
+# Configuração de Logs
+logger = logging.getLogger(__name__)
 
 bp = Blueprint('marketing_webhook', __name__)
 
-# Configuração
-EVOLUTION_API_URL = os.getenv("WHATSAPP_QR_SERVICE_URL", "http://localhost:8080").rstrip("/")
-EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "")
+# Palavras que ATIVAM o robô (para ele não responder seus amigos falando "e ai")
+GATILHOS_BOT = [
+    "olá", "ola", "oi", "bom dia", "boa tarde", "boa noite", 
+    "tudo bem", "agendar", "marcar", "consulta", "preço", 
+    "valor", "doutor", "dentista", "endereço", "avaliac", "avaliaç"
+]
 
-def send_whatsapp_text(instance, phone, text):
-    """Envia mensagem de texto via Evolution API"""
-    # Ajuste aqui se sua instância tiver outro nome
-    if not instance: instance = "clinica_v3_1" 
-    
-    url = f"{EVOLUTION_API_URL}/message/sendText/{instance}"
-    headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
-    payload = {"number": phone, "text": text}
-    try:
-        print(f"📤 Enviando para {phone}: {text[:30]}...")
-        requests.post(url, json=payload, headers=headers, timeout=5)
-    except Exception as e:
-        print(f"❌ Erro ao enviar WA: {e}")
-
-# ✅ MUDANÇA AQUI: Adicionei 'GET' na lista de methods
-@bp.route('/webhook/whatsapp', methods=['POST', 'GET'])
-def whatsapp_inbound():
-    # 1. Se for acesso via Navegador (GET), retorna sucesso para teste
-    if request.method == 'GET':
-        return jsonify({
-            "status": "online", 
-            "message": "O Webhook de Marketing está ativo e aguardando mensagens via POST!"
-        }), 200
-
-    # 2. Lógica normal do Webhook (POST)
+@bp.route('/webhook/whatsapp', methods=['POST'])
+def whatsapp_webhook():
     data = request.get_json()
     
+    # 1. Validação Básica
     if not data or 'data' not in data:
-        return jsonify({"status": "ignored"}), 200
-        
+        return jsonify({"status": "ignored", "reason": "no data"}), 200
+
     payload = data['data']
-    key = payload.get('key', {})
-    remote_jid = key.get('remoteJid') 
-    from_me = key.get('fromMe', False)
     
-    # Ignora mensagens próprias ou de grupos
-    if not remote_jid or from_me or 'status@broadcast' in remote_jid or 'g.us' in remote_jid:
-        return jsonify({"status": "ignored"}), 200
+    # 2. Verifica se é mensagem de texto recebida
+    if 'key' not in payload or payload['key'].get('fromMe') == True:
+        return jsonify({"status": "ignored", "reason": "from_me"}), 200
 
+    # 3. Extrai dados vitais
+    remote_jid = payload['key'].get('remoteJid') # numero@s.whatsapp.net
     phone = remote_jid.split('@')[0]
-    instance = data.get('instance', 'clinica_v3_1')
+    push_name = payload.get('pushName', 'Paciente')
     
-    msg_content = payload.get('message', {})
-    text = msg_content.get('conversation') or msg_content.get('extendedTextMessage', {}).get('text')
+    # Pega o texto da mensagem (tenta vários campos possíveis da API)
+    message_text = ""
+    if 'message' in payload:
+        msg = payload['message']
+        if 'conversation' in msg:
+            message_text = msg['conversation']
+        elif 'extendedTextMessage' in msg:
+            message_text = msg['extendedTextMessage'].get('text', '')
     
-    if not text:
-        return jsonify({"status": "no_text"}), 200
+    message_text = message_text.lower().strip()
+    
+    if not message_text:
+        return jsonify({"status": "ignored", "reason": "no text"}), 200
 
-    # Lógica de Identificação (Paciente vs Lead)
-    clinic_id = 1 
+    # 4. Descobre a Clínica dona dessa instância
+    instance_owner = data.get('instance') # Nome da instância na Evolution
+    # Tenta achar conexão pelo nome da instância ou pelo número dono
+    conn = None
     
-    # Verifica Paciente Existente
-    patient = Patient.query.filter_by(phone=phone, clinic_id=clinic_id).first()
-    if patient:
-        return jsonify({"status": "existing_patient"}), 200
+    # Busca simples: A primeira clínica que tiver conectada (para MVP)
+    # Num sistema real, buscaria pelo instance_name exato
+    conn = WhatsAppConnection.query.filter_by(status='connected').first()
+    
+    if not conn:
+        print("⚠️ Nenhuma clínica conectada encontrada para processar mensagem.")
+        return jsonify({"status": "error", "reason": "no clinic connected"}), 200
 
-    # Verifica/Cria Lead
-    lead = Lead.query.filter_by(phone=phone, clinic_id=clinic_id).first()
+    clinic_id = conn.clinic_id
+
+    # 5. Lógica do Robô (Fluxo Simples)
+    # Verifica se já existe um card ABERTO para esse telefone
+    existing_card = CRMCard.query.join(CRMStage).filter(
+        CRMStage.clinic_id == clinic_id,
+        CRMCard.paciente_phone == phone,
+        CRMStage.is_success == False # Apenas cards em andamento
+    ).first()
+
+    # --- CENÁRIO A: JÁ ESTÁ NO CRM (Não faz nada ou avisa humano) ---
+    if existing_card:
+        print(f"🔄 Paciente {phone} já está no funil. Robô silenciado.")
+        return jsonify({"status": "ignored", "reason": "already in crm"}), 200
+
+    # --- CENÁRIO B: NOVO LEAD (Inicia Atendimento) ---
     
-    if not lead:
-        campaign_id = None
-        match = re.search(r'\[ref:(.*?)\]', text)
-        if match:
-            code = match.group(1)
-            camp = Campaign.query.filter_by(tracking_code=code, clinic_id=clinic_id).first()
-            if camp:
-                campaign_id = camp.id
-                camp.leads_count += 1
+    # Filtro: Só ativa se tiver palavra chave (Evita responder amigos)
+    eh_gatilho = any(palavra in message_text for palavra in GATILHOS_BOT)
+    
+    if eh_gatilho:
+        print(f"🤖 Robô Ativado para: {phone} | Msg: {message_text}")
         
-        lead = Lead(
-            clinic_id=clinic_id,
-            phone=phone,
-            campaign_id=campaign_id,
-            source='whatsapp_inbound',
-            status=LeadStatus.IN_CHAT,
-            chatbot_state='START',
-            name=payload.get('pushName')
-        )
-        db.session.add(lead)
-        db.session.commit()
+        # 1. Cria o Card na Coluna "Novo Lead" (Busca Dinâmica)
+        stage = CRMStage.query.filter_by(clinic_id=clinic_id, is_initial=True).first()
         
-        # Log
-        db.session.add(LeadEvent(lead_id=lead.id, event_type='lead_created', metadata_json={'text': text}))
-        db.session.commit()
-
-    # Processa Resposta do Robô
-    process_chatbot(lead, text, instance)
-    
-    return jsonify({"status": "processed"}), 200
-
-def process_chatbot(lead, text, instance):
-    if lead.status in [LeadStatus.QUALIFIED, LeadStatus.SCHEDULED, LeadStatus.CONVERTED]:
-        return
-
-    state = lead.chatbot_state
-    
-    if state == 'START':
-        msg = f"Olá! 👋 Vi que você entrou em contato com a nossa clínica.\nEu sou o assistente virtual. Para começarmos, você poderia me confirmar seu *nome completo*?"
-        send_whatsapp_text(instance, lead.phone, msg)
-        lead.chatbot_state = 'ASK_INTEREST'
-        
-    elif state == 'ASK_INTEREST':
-        if not lead.name or lead.name == lead.phone:
-            lead.name = text.strip()
+        # Se não achou a marcada como inicial, pega a primeira que tiver
+        if not stage:
+            stage = CRMStage.query.filter_by(clinic_id=clinic_id).order_by(CRMStage.ordem).first()
             
-        msg = f"Prazer, {lead.name}! 😄\n\nQual tratamento você está procurando hoje?\n1. Implante\n2. Clareamento\n3. Aparelho\n4. Dor/Emergência\n5. Outros"
-        send_whatsapp_text(instance, lead.phone, msg)
-        lead.chatbot_state = 'HANDOFF'
-        
-    elif state == 'HANDOFF':
-        lead.chatbot_data = {"interest": text.strip()}
-        msg = "Perfeito! Já anotei aqui. 📝\n\nUm de nossos atendentes humanos vai falar com você em instantes para agendar sua avaliação. Obrigado!"
-        send_whatsapp_text(instance, lead.phone, msg)
-        lead.status = LeadStatus.QUALIFIED
-        lead.chatbot_state = 'DONE'
-    
-    lead.updated_at = datetime.utcnow()
-    db.session.commit()
+        if stage:
+            try:
+                # Salva no Banco
+                novo_card = CRMCard(
+                    stage_id=stage.id,
+                    paciente_nome=push_name, # Salva o nome do WhatsApp (ex: Jesus is King)
+                    paciente_phone=phone,
+                    historico_conversas=f"Iniciou via WhatsApp: {message_text}",
+                    valor_proposta=0
+                )
+                db.session.add(novo_card)
+                db.session.commit()
+                print(f"✅ Lead Salvo no CRM! ID: {novo_card.id}")
+
+                # 2. Manda a Resposta Automática (via Evolution API)
+                # Você precisaria implementar o envio de volta aqui ou usar a função de envio existente
+                # Como este código é o webhook, ele apenas processa a entrada.
+                # O envio da resposta "Olá, vi seu contato..." idealmente é feito aqui chamando a API.
+                
+                # EXEMPLO DE RESPOSTA AUTOMÁTICA (Descomente se tiver a função send_message pronta)
+                # from app.utils.whatsapp import send_whatsapp_message
+                # send_whatsapp_message(phone, "Olá! 👋 Vi seu contato. Sou o assistente virtual da clínica. Como posso ajudar?", conn.instance_name)
+
+            except Exception as e:
+                print(f"❌ Erro ao salvar no CRM: {e}")
+                db.session.rollback()
+        else:
+            print("❌ Nenhuma etapa de CRM configurada para esta clínica.")
+
+    return jsonify({"status": "processed"}), 200
