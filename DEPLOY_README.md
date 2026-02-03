@@ -31,7 +31,8 @@
 | `EVOLUTION_API_KEY` | API Key da Evolution | `429683C4C977415CAAF6...` |
 
 ### 2. Comandos de Build
-- **Backend**: `pip install -r requirements.txt && python auto_migrate.py`
+- **Build Command**: `./render-build.sh`
+- **Start Command**: `cd backend && python auto_migrate.py && gunicorn run:app`
 - **Frontend**: `npm install && npm run build` (Diretório de saída: `dist`)
 
 ### 3. Webhook (Configuração na Evolution API)

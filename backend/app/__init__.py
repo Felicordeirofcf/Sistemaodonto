@@ -257,15 +257,35 @@ def create_app():
             db.session.rollback()
             return jsonify({"error": str(e)}), 500
 
+    # --- HANDLER GLOBAL DE ERROS (JSON) ---
+    @app.errorhandler(Exception)
+    def handle_exception(e):
+        # Se for um erro HTTP (ex: 404, 405), mantém o código original
+        from werkzeug.exceptions import HTTPException
+        code = 500
+        if isinstance(e, HTTPException):
+            code = e.code
+        
+        # Log do erro para debug no Render
+        logger.error(f"🔥 ERRO GLOBAL: {str(e)}", exc_info=True)
+        
+        # Se a rota for API ou Auth, retorna JSON
+        if request.path.startswith("/api") or request.path.startswith("/auth"):
+            return jsonify({
+                "error": True,
+                "message": str(e),
+                "code": code
+            }), code
+        
+        # Fallback para o index.html (SPA) em caso de 404 em rotas não-API
+        if code == 404:
+            return app.send_static_file("index.html")
+            
+        return jsonify({"error": True, "message": "Erro interno do servidor"}), 500
+
     # --- FRONTEND (SPA) ---
     @app.route("/")
     def index():
-        return app.send_static_file("index.html")
-
-    @app.errorhandler(404)
-    def not_found(e):
-        if request.path.startswith("/api") or request.path.startswith("/auth"):
-            return jsonify({"error": "Rota não encontrada"}), 404
         return app.send_static_file("index.html")
 
     return app

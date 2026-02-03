@@ -45,8 +45,15 @@ export function Dashboard() {
         headers: { 'Authorization': `Bearer ${token}` }
     })
       .then(async (res) => {
-        if (!res.ok) throw new Error('Erro ao carregar dados');
-        return res.json();
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.message || 'Erro ao carregar dados');
+          return data;
+        } else {
+          const text = await res.text();
+          throw new Error('Resposta não é JSON: ' + text.substring(0, 100));
+        }
       })
       .then(data => {
         setStats(data);
@@ -121,7 +128,7 @@ export function Dashboard() {
           </div>
           
           {/* CORREÇÃO AQUI: Style inline garante altura para o Recharts não quebrar */}
-          <div style={{ width: '100%', height: 320 }}>
+          <div style={{ width: '100%', height: 320, minHeight: 320 }}>
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={data}>
                 <defs>

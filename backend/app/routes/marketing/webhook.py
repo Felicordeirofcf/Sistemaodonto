@@ -157,40 +157,89 @@ def whatsapp_webhook():
     campaign = Campaign.query.filter(Campaign.tracking_code.ilike(code)).first() if code else None
     source_text = f"Campanha: {campaign.name}" if campaign else "WhatsApp (orgânico)"
 
-    try:
-        # Log Event
-        db.session.add(LeadEvent(campaign_id=campaign.id if campaign else None, event_type='msg_in', metadata_json={"phone": phone, "push_name": push_name, "message": message_text, "clinic_id": clinic_id}))
+    import uuid
+    trace_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{trace_id}] Processando mensagem de {phone} para clínica {clinic_id}")
 
+    try:
+        # Log Event com Trace ID
+        db.session.add(LeadEvent(
+            campaign_id=campaign.id if campaign else None, 
+            event_type='msg_in', 
+            metadata_json={
+                "phone": phone, 
+                "push_name": push_name, 
+                "message": message_text, 
+                "clinic_id": clinic_id,
+                "trace_id": trace_id
+            }
+        ))
+
+        # Busca Lead existente
+        lead = Lead.query.filter_by(clinic_id=clinic_id, phone=phone).first()
+        
         # Busca Card Aberto
         existing_card = CRMCard.query.filter(CRMCard.clinic_id == clinic_id, CRMCard.paciente_phone == phone, CRMCard.status == 'open').first()
 
         if existing_card:
+            logger.info(f"[{trace_id}] Card aberto encontrado. Atualizando histórico.")
             prev = existing_card.historico_conversas or ""
             existing_card.historico_conversas = (prev + f"\n{push_name}: {message_text}").strip()
             existing_card.ultima_interacao = datetime.utcnow()
+            
+            # Se o lead estiver em estado de chatbot, poderíamos processar a lógica aqui
+            if lead and lead.chatbot_state != 'FINISHED':
+                # Lógica simples de transição de estado (exemplo)
+                if "agendar" in message_text.lower() or "consulta" in message_text.lower():
+                    lead.chatbot_state = 'BOOKING'
+                    _send_whatsapp_reply(clinic_id, phone, "Perfeito! Qual o melhor dia e horário para você?")
+            
             db.session.commit()
-            return jsonify({"status": "processed"}), 200
+            return jsonify({"status": "processed", "trace_id": trace_id}), 200
 
         # Novo Lead / Card
-        lead = Lead.query.filter_by(clinic_id=clinic_id, phone=phone).first()
         if not lead:
-            lead = Lead(clinic_id=clinic_id, campaign_id=campaign.id if campaign else None, name=push_name, phone=phone, source=source_text, status='novo')
+            logger.info(f"[{trace_id}] Criando novo lead.")
+            lead = Lead(
+                clinic_id=clinic_id, 
+                campaign_id=campaign.id if campaign else None, 
+                name=push_name, 
+                phone=phone, 
+                source=source_text, 
+                status='novo',
+                chatbot_state='START'
+            )
             db.session.add(lead)
         
         stage = CRMStage.query.filter_by(clinic_id=clinic_id, is_initial=True).first()
         if stage:
-            novo_card = CRMCard(clinic_id=clinic_id, stage_id=stage.id, paciente_nome=push_name, paciente_phone=phone, historico_conversas=f"{source_text}: {message_text}", status='open', ultima_interacao=datetime.utcnow())
+            logger.info(f"[{trace_id}] Criando novo card no CRM.")
+            novo_card = CRMCard(
+                clinic_id=clinic_id, 
+                stage_id=stage.id, 
+                paciente_nome=push_name, 
+                paciente_phone=phone, 
+                historico_conversas=f"{source_text}: {message_text}", 
+                status='open', 
+                ultima_interacao=datetime.utcnow()
+            )
             db.session.add(novo_card)
 
         if campaign:
+            logger.info(f"[{trace_id}] Incrementando conversão da campanha {campaign.id}.")
             campaign.leads_count = (campaign.leads_count or 0) + 1
-            # --- CHATBOT: Resposta Automática da Campanha ---
-            # Se a campanha tiver uma mensagem configurada ou se quisermos uma saudação padrão
-            reply_text = f"Olá {push_name}! Recebemos seu interesse na campanha *{campaign.name}*. Em breve um de nossos especialistas entrará em contato para agendar sua avaliação! 🦷✨"
+            
+            # Resposta Automática da Campanha
+            reply_text = f"Olá {push_name}! Recebemos seu interesse na campanha *{campaign.name}*. \n\nComo posso te ajudar hoje?\n1. Agendar Avaliação\n2. Saber Preços\n3. Falar com Atendente"
+            _send_whatsapp_reply(clinic_id, phone, reply_text)
+            lead.chatbot_state = 'AWAITING_CHOICE'
+        else:
+            # Resposta padrão orgânica
+            reply_text = f"Olá {push_name}, bem-vindo à nossa clínica! Em que podemos ajudar?"
             _send_whatsapp_reply(clinic_id, phone, reply_text)
 
         db.session.commit()
-        return jsonify({"status": "processed", "clinic_id": clinic_id}), 200
+        return jsonify({"status": "processed", "clinic_id": clinic_id, "trace_id": trace_id}), 200
 
     except Exception as e:
         logger.exception(f"Erro no webhook: {e}")

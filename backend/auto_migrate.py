@@ -38,6 +38,10 @@ def init_db():
                 "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS end_datetime TIMESTAMP WITHOUT TIME ZONE;",
                 "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITHOUT TIME ZONE;",
                 "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITHOUT TIME ZONE;",
+                "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'scheduled';",
+                "ALTER TABLE patients ADD COLUMN IF NOT EXISTS receive_marketing BOOLEAN DEFAULT TRUE;",
+                "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS patient_id INTEGER;",
+                "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS clinic_id INTEGER;",
             ]
             
             for statement in alter_statements:

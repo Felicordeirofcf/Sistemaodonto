@@ -43,8 +43,8 @@ def get_stats():
         # 4. Consultas do dia
         agendamentos_hoje = Appointment.query.filter(
             Appointment.clinic_id == current_clinic_id,
-            Appointment.date_time >= today_start,
-            Appointment.date_time <= today_end
+            Appointment.start_datetime >= today_start,
+            Appointment.start_datetime <= today_end
         ).count() or 0
 
         return jsonify({
