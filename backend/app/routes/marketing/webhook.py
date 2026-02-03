@@ -19,7 +19,9 @@ GATILHOS_BOT = [
     "valor", "doutor", "dentista", "endereço", "avaliac", "avaliaç"
 ]
 
+# --- ROTA DUPLA (ACEITA AS DUAS FORMAS) ---
 @bp.route('/webhook/whatsapp', methods=['POST'])
+@bp.route('/webhook/whatsapp/messages-upsert', methods=['POST']) # <--- Adicionei essa linha para corrigir o erro 405
 def whatsapp_webhook():
     data = request.get_json()
     
@@ -50,11 +52,9 @@ def whatsapp_webhook():
     if not message_text:
         return jsonify({"status": "ignored", "reason": "no text"}), 200
 
-    # --- CORREÇÃO DO ERRO "NENHUMA CLÍNICA CONECTADA" ---
-    # Tenta achar conexão no banco
+    # --- AUTO-RECOVERY DA CONEXÃO ---
     conn = WhatsAppConnection.query.filter_by(status='connected').first()
     
-    # Se não achou no banco, força busca na API (Auto-Recovery)
     if not conn:
         print("⚠️ Conexão não encontrada no DB. Buscando na API...")
         try:
@@ -64,18 +64,16 @@ def whatsapp_webhook():
             
             if resp.status_code == 200:
                 instances = resp.json()
-                # Pega a primeira instância ONLINE
                 active_instance = next((i for i in instances if i.get('instance', {}).get('status') == 'open'), None)
                 
                 if active_instance:
                     owner_jid = active_instance['instance']['owner']
                     instance_name = active_instance['instance']['instanceName']
                     
-                    # Salva/Cria no banco agora mesmo
                     conn = WhatsAppConnection.query.filter_by(instance_name=instance_name).first()
                     if not conn:
                         conn = WhatsAppConnection(
-                            clinic_id=1, # Assume clínica 1 para recuperação
+                            clinic_id=1,
                             instance_name=instance_name,
                             status='connected',
                             session_data={"me": {"id": owner_jid}}
@@ -91,7 +89,6 @@ def whatsapp_webhook():
             print(f"❌ Erro ao tentar recuperar conexão: {e}")
 
     if not conn:
-        print("❌ FALHA FATAL: Nenhuma clínica conectada encontrada.")
         return jsonify({"status": "error", "reason": "no clinic connected"}), 200
 
     clinic_id = conn.clinic_id
@@ -113,7 +110,6 @@ def whatsapp_webhook():
     if eh_gatilho:
         print(f"🤖 Novo Lead Detectado: {phone}")
         
-        # Busca coluna inicial de forma segura
         stage = CRMStage.query.filter_by(clinic_id=clinic_id, is_initial=True).first()
         if not stage:
             stage = CRMStage.query.filter_by(clinic_id=clinic_id).order_by(CRMStage.ordem).first()
