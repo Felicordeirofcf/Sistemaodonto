@@ -109,14 +109,15 @@ def delete_campaign(id):
         return jsonify({"error": str(e)}), 500
 
 # ==============================================================================
-# 2. ROTA DE RASTREAMENTO (CORRIGIDA)
+# 2. ROTA DE RASTREAMENTO (CORRIGIDA - SEM ERRO DE ATTRIBUTO)
 # ==============================================================================
 @bp.route('/c/<code>', methods=['GET'])
 def track_click_and_redirect(code):
+    # Busca campanha
     campaign = Campaign.query.filter_by(tracking_code=code).first()
     
     if not campaign:
-        return "<h1 style='font-family:sans-serif;text-align:center;margin-top:50px;'>⚠️ Link Inválido ou Não Encontrado</h1>", 404
+        return "<h1 style='font-family:sans-serif;text-align:center;margin-top:50px;'>⚠️ Link Inválido</h1>", 404
 
     if not campaign.active:
         return "<h1 style='font-family:sans-serif;text-align:center;margin-top:50px;'>⏸️ Campanha Pausada</h1>", 200
@@ -132,53 +133,51 @@ def track_click_and_redirect(code):
         db.session.add(event)
         db.session.commit()
     except Exception as e:
-        print(f"Erro ao salvar métrica: {e}")
+        print(f"Erro métrica: {e}")
 
-    # 2. Descobre o Número (Lógica Blindada)
+    # 2. Descobre o Número (SEM USAR instance_name DO BANCO)
     target_phone = None
     
-    # Tenta conexão do banco
+    # A) Tenta cache do banco (se já tiver salvo o numero)
     conn = WhatsAppConnection.query.filter_by(clinic_id=campaign.clinic_id).first()
-    
-    # A) Tenta cache do banco
     if conn and conn.session_data:
         jid = conn.session_data.get('me', {}).get('id')
         if jid:
             target_phone = jid.split('@')[0].split(':')[0]
 
-    # B) Tenta API Evolution (Se não achou no banco)
+    # B) Tenta API Evolution (Busca QUALQUER instância online)
     if not target_phone:
-        print(f"🔄 [API] Buscando instâncias na Evolution...")
+        print(f"🔄 [API] Consultando Evolution API para descobrir número...")
         try:
             url = f"{EVOLUTION_API_URL}/instance/fetchInstances"
             headers = {"apikey": EVOLUTION_API_KEY}
-            resp = requests.get(url, headers=headers, timeout=5)
+            resp = requests.get(url, headers=headers, timeout=4)
             
             if resp.status_code == 200:
                 instances = resp.json()
-                # Pega a PRIMEIRA instância que estiver conectada (status: open)
+                # Pega a primeira instância com status 'open'
                 active_instance = next((i for i in instances if i.get('instance', {}).get('status') == 'open'), None)
                 
                 if active_instance:
-                    owner_jid = active_instance['instance']['owner'] # ex: 5511999999@s.whatsapp.net
+                    owner_jid = active_instance['instance']['owner'] # ex: 551199999@s.whatsapp.net
                     target_phone = owner_jid.split('@')[0].split(':')[0]
-                    print(f"✅ [API] Instância encontrada: {active_instance['instance']['instanceName']} -> {target_phone}")
+                    print(f"✅ [API] Número encontrado na Evolution: {target_phone}")
                     
-                    # Salva no banco para ficar rápido na próxima
+                    # Salva no banco para a próxima vez ser rápida
                     if conn:
                         conn.session_data = {"me": {"id": owner_jid}}
                         conn.status = "connected"
                         db.session.commit()
         except Exception as e:
-            print(f"❌ Erro ao consultar Evolution API: {e}")
+            print(f"❌ Erro ao consultar Evolution: {e}")
 
-    # C) Fallback Final (Se tudo falhar, usa um padrão ou erro)
+    # C) Fallback de Emergência (Evita tela de erro 500)
     if not target_phone:
          return """
         <div style="font-family:sans-serif; text-align:center; padding:50px;">
             <h1>⚠️ WhatsApp Não Conectado</h1>
-            <p>Não foi possível identificar o número da clínica.</p>
-            <p>Verifique se o QR Code está conectado no painel.</p>
+            <p>O sistema não conseguiu identificar o número da clínica.</p>
+            <p>Verifique se o QR Code está lido na aba WhatsApp.</p>
         </div>
         """, 503
 
