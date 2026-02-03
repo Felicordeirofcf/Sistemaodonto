@@ -6,24 +6,17 @@ import { Loader2, ShieldAlert } from 'lucide-react';
 // --- IMPORTAÇÕES DE PÁGINAS ---
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
-
 import { Pacientes } from './pages/Pacientes';
 import { Agenda } from './pages/Agenda';
-import { Odontograma } from './pages/Odontograma';
 import { Harmonizacao } from './pages/Harmonizacao';
 import { Financeiro } from './pages/Financeiro';
 import { Estoque } from './pages/Estoque';
-
 import { GestaoEquipe } from './pages/GestaoEquipe';
-import { AtendeChat } from './pages/AtendeChat';
 import { Configuracoes } from './pages/Configuracoes';
 import { LandingPage } from './pages/LandingPage';
-
-// Módulos de Marketing
 import { WhatsAppModulePage } from './pages/WhatsAppModulePage';
-import MarketingPage from './pages/MarketingPage'; // ✅ [NOVO] Importação da página de Recall
+import MarketingPage from './pages/MarketingPage';
 
-// --- COMPONENTE DE BLOQUEIO (UI INDUSTRIAL) ---
 const BloqueioPagamento = () => (
   <div className="fixed inset-0 bg-slate-900/95 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm">
     <div className="bg-white p-10 rounded-[3rem] max-w-md text-center shadow-2xl border border-red-50 animate-in zoom-in duration-300">
@@ -39,7 +32,6 @@ const BloqueioPagamento = () => (
   </div>
 );
 
-// --- ROTA PRIVADA COM VERIFICAÇÃO DE STATUS ---
 const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
   const token = localStorage.getItem('odonto_token');
   const [isActive, setIsActive] = useState<boolean | null>(null);
@@ -47,7 +39,6 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     if (token) {
-      // Ajuste a URL se necessário (ex: http://localhost:5000/auth/status)
       fetch('/auth/status', {
         headers: { 'Authorization': `Bearer ${token}` }
       })
@@ -56,10 +47,7 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
         return res.json();
       })
       .then(data => setIsActive(data.is_active))
-      .catch((err) => {
-        console.error("Erro no Status:", err);
-        setIsActive(true); 
-      })
+      .catch(() => setIsActive(true))
       .finally(() => setChecking(false));
     } else {
       setChecking(false);
@@ -78,20 +66,15 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
-// --- APLICAÇÃO PRINCIPAL ---
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Rotas Públicas */}
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
-
-        {/* EXCEÇÃO PARA APIS */}
         <Route path="/api/*" element={null} />
         <Route path="/auth/*" element={null} />
         
-        {/* Rotas Protegidas do Sistema (SaaS) */}
         <Route path="/app/*" element={
           <PrivateRoute>
             <div className="flex min-h-screen bg-gray-50 font-sans">
@@ -99,25 +82,15 @@ function App() {
               <main className="flex-1 md:ml-64 transition-all duration-300 w-full overflow-x-hidden">
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
-                  
                   <Route path="/pacientes" element={<Pacientes />} />
                   <Route path="/agenda" element={<Agenda />} />
-                  <Route path="/odontograma" element={<Odontograma />} />
                   <Route path="/harmonizacao" element={<Harmonizacao />} />
                   <Route path="/financeiro" element={<Financeiro />} />
                   <Route path="/estoque" element={<Estoque />} />
-                  
                   <Route path="/gestao-equipe" element={<GestaoEquipe />} />
-                  <Route path="/atende-chat" element={<AtendeChat />} />
-
-                  {/* Módulo WhatsApp (Conexão e Chat Manual) */}
                   <Route path="/whatsapp" element={<WhatsAppModulePage />} />
-
-                  {/* ✅ [NOVO] Módulo Marketing (Recall Automático & CRM) */}
                   <Route path="/marketing" element={<MarketingPage />} />
-
                   <Route path="/configuracoes" element={<Configuracoes />} />
-                  
                   <Route path="*" element={<Navigate to="/app" replace />} />
                 </Routes>
               </main>

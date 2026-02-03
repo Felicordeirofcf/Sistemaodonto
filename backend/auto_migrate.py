@@ -16,15 +16,28 @@ def init_db():
             # 1. Tenta criar tabelas que não existem
             db.create_all()
             
-            # 2. Força a criação de colunas específicas que podem estar faltando no PostgreSQL (Render)
-            # O db.create_all() não adiciona colunas em tabelas já existentes.
-            print("🛠️ Verificando colunas extras em crm_cards...")
+            # 2. Força a criação de colunas específicas que podem estar faltando
+            print("🛠️ Verificando colunas extras...")
             
             alter_statements = [
+                # CRM Cards
                 "ALTER TABLE crm_cards ADD COLUMN IF NOT EXISTS paciente_nome VARCHAR(100);",
                 "ALTER TABLE crm_cards ADD COLUMN IF NOT EXISTS paciente_phone VARCHAR(30);",
                 "ALTER TABLE crm_cards ADD COLUMN IF NOT EXISTS historico_conversas TEXT;",
-                "ALTER TABLE crm_cards ADD COLUMN IF NOT EXISTS valor_proposta FLOAT DEFAULT 0.0;"
+                "ALTER TABLE crm_cards ADD COLUMN IF NOT EXISTS valor_proposta FLOAT DEFAULT 0.0;",
+                "ALTER TABLE crm_cards ADD COLUMN IF NOT EXISTS ultima_interacao TIMESTAMP WITHOUT TIME ZONE;",
+                
+                # Clinic
+                "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(20);",
+                
+                # Appointments (Migration to new structure)
+                "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS lead_id INTEGER;",
+                "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS title VARCHAR(100);",
+                "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS description TEXT;",
+                "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS start_datetime TIMESTAMP WITHOUT TIME ZONE;",
+                "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS end_datetime TIMESTAMP WITHOUT TIME ZONE;",
+                "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITHOUT TIME ZONE;",
+                "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITHOUT TIME ZONE;",
             ]
             
             for statement in alter_statements:

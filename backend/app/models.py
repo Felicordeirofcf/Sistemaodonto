@@ -134,21 +134,44 @@ class Appointment(db.Model):
     __tablename__ = "appointments"
     id = db.Column(db.Integer, primary_key=True)
 
-    date_time = db.Column(db.DateTime, nullable=False)
-    patient_name = db.Column(db.String(100))
-    procedure = db.Column(db.String(100))
-    status = db.Column(db.String(20), default="confirmed")
-
-    patient_id = db.Column(db.Integer, db.ForeignKey("patients.id"), nullable=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=False)
+    patient_id = db.Column(db.Integer, db.ForeignKey("patients.id"), nullable=True)
+    lead_id = db.Column(db.Integer, db.ForeignKey("marketing_leads.id"), nullable=True)
+
+    title = db.Column(db.String(100))
+    description = db.Column(db.Text)
+    
+    start_datetime = db.Column(db.DateTime, nullable=False)
+    end_datetime = db.Column(db.DateTime, nullable=False)
+    
+    status = db.Column(db.String(20), default="scheduled") # scheduled|confirmed|done|cancelled
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Back-compatibility fields (optional, but keeping for safety if used elsewhere)
+    @property
+    def date_time(self):
+        return self.start_datetime
+    
+    @property
+    def patient_name(self):
+        if self.patient:
+            return self.patient.name
+        return self.title
 
     def to_dict(self):
         return {
             "id": self.id,
-            "date": self.date_time.isoformat(),
-            "patient_name": self.patient_name,
-            "procedure": self.procedure,
-            "status": self.status
+            "clinic_id": self.clinic_id,
+            "patient_id": self.patient_id,
+            "lead_id": self.lead_id,
+            "title": self.title,
+            "description": self.description,
+            "start": self.start_datetime.isoformat(),
+            "end": self.end_datetime.isoformat(),
+            "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None
         }
 
 

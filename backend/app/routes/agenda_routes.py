@@ -1,84 +1,105 @@
 from flask import Blueprint, jsonify, request
-from app.models import db, Appointment, Transaction, Patient, User
+from app.models import db, Appointment, Patient, User, Lead
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from datetime import datetime
+from datetime import datetime, timedelta
 
 agenda_bp = Blueprint('agenda_bp', __name__)
 
-# 1. LISTAR CONSULTAS
+def _get_clinic_id():
+    identity = get_jwt_identity()
+    if isinstance(identity, dict):
+        return identity.get("clinic_id")
+    user = User.query.get(identity)
+    return user.clinic_id if user else None
+
 @agenda_bp.route('/appointments', methods=['GET'])
 @jwt_required()
 def get_appointments():
-    user = User.query.get(get_jwt_identity())
-    appointments = Appointment.query.filter_by(clinic_id=user.clinic_id).all()
+    clinic_id = _get_clinic_id()
+    start_str = request.args.get('from')
+    end_str = request.args.get('to')
     
-    output = []
-    for appt in appointments:
-        # Nota: Ajustando campos baseados no modelo Appointment real
-        output.append({
-            'id': appt.id,
-            'title': f"{appt.patient_name or (appt.patient.name if appt.patient else 'Paciente')} - {appt.procedure}",
-            'start': appt.date_time.isoformat(),
-            'end': appt.date_time.isoformat(),
-            'status': appt.status
-        })
-    return jsonify(output), 200
+    query = Appointment.query.filter_by(clinic_id=clinic_id)
+    
+    if start_str:
+        try:
+            start_dt = datetime.fromisoformat(start_str)
+            query = query.filter(Appointment.start_datetime >= start_dt)
+        except: pass
+    if end_str:
+        try:
+            end_dt = datetime.fromisoformat(end_str)
+            query = query.filter(Appointment.start_datetime <= end_dt)
+        except: pass
+        
+    appointments = query.order_by(Appointment.start_datetime).all()
+    return jsonify([appt.to_dict() for appt in appointments]), 200
 
-# 2. WEBHOOK PARA O CHATBOT (MARCAR CONSULTA AUTOMÁTICA)
-@agenda_bp.route('/webhooks/chatbot-booking', methods=['POST'])
-def chatbot_booking():
+@agenda_bp.route('/appointments', methods=['POST'])
+@jwt_required()
+def create_appointment():
+    clinic_id = _get_clinic_id()
     data = request.get_json()
     
     try:
-        # Busca ou cria o paciente profissionalmente
-        patient = Patient.query.filter_by(phone=data['phone'], clinic_id=data['clinic_id']).first()
-        if not patient:
-            patient = Patient(
-                name=data['name'], 
-                phone=data['phone'], 
-                source='Chatbot-IA',
-                clinic_id=data['clinic_id']
-            )
-            db.session.add(patient)
-            db.session.flush()
-
-        # Cria o agendamento
+        start_dt = datetime.fromisoformat(data['start'])
+        # Default duration 1 hour if end not provided
+        if 'end' in data:
+            end_dt = datetime.fromisoformat(data['end'])
+        else:
+            end_dt = start_dt + timedelta(hours=float(data.get('duration', 1)))
+            
         new_appt = Appointment(
-            patient_id=patient.id,
-            clinic_id=data['clinic_id'],
-            date_time=datetime.fromisoformat(data['date']),
-            procedure=data['service'],
-            status='agendado'
+            clinic_id=clinic_id,
+            patient_id=data.get('patient_id'),
+            lead_id=data.get('lead_id'),
+            title=data.get('title') or data.get('patient_name'),
+            description=data.get('description') or data.get('procedure'),
+            start_datetime=start_dt,
+            end_datetime=end_dt,
+            status=data.get('status', 'scheduled')
         )
-        db.session.add(new_appt)
         
+        db.session.add(new_appt)
         db.session.commit()
-        return jsonify({"message": "Sincronização Bot-Agenda concluída!"}), 201
+        return jsonify(new_appt.to_dict()), 201
     except Exception as e:
         db.session.rollback()
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e)}), 400
 
-# 3. FINALIZAR CONSULTA
-@agenda_bp.route('/appointments/<int:id>/finish', methods=['PUT'])
+@agenda_bp.route('/appointments/<int:id>', methods=['PATCH'])
 @jwt_required()
-def finish_appointment(id):
-    user = User.query.get(get_jwt_identity())
-    appt = Appointment.query.filter_by(id=id, clinic_id=user.clinic_id).first()
+def update_appointment(id):
+    clinic_id = _get_clinic_id()
+    appt = Appointment.query.filter_by(id=id, clinic_id=clinic_id).first_or_404()
+    data = request.get_json()
     
-    if not appt: return jsonify({'error': 'Consulta não encontrada'}), 404
+    try:
+        if 'start' in data:
+            appt.start_datetime = datetime.fromisoformat(data['start'])
+        if 'end' in data:
+            appt.end_datetime = datetime.fromisoformat(data['end'])
+        if 'title' in data:
+            appt.title = data['title']
+        if 'description' in data:
+            appt.description = data['description']
+        if 'status' in data:
+            appt.status = data['status']
+        if 'patient_id' in data:
+            appt.patient_id = data['patient_id']
+            
+        db.session.commit()
+        return jsonify(appt.to_dict()), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400
+
+@agenda_bp.route('/appointments/<int:id>', methods=['DELETE'])
+@jwt_required()
+def delete_appointment(id):
+    clinic_id = _get_clinic_id()
+    appt = Appointment.query.filter_by(id=id, clinic_id=clinic_id).first_or_404()
     
-    appt.status = 'concluido'
-    
-    # Lógica simplificada de transação financeira
-    new_transaction = Transaction(
-        clinic_id=user.clinic_id,
-        description=f"Atendimento: {appt.patient_name or (appt.patient.name if appt.patient else 'Paciente')} ({appt.procedure})",
-        amount=0.0, # Valor deve ser preenchido ou vir do front
-        type='income',
-        category='Tratamento',
-        date=datetime.utcnow()
-    )
-    db.session.add(new_transaction)
-    
+    db.session.delete(appt)
     db.session.commit()
-    return jsonify({'message': 'Consulta finalizada!'}), 200
+    return jsonify({"message": "Agendamento removido"}), 200

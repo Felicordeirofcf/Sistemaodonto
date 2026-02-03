@@ -1,11 +1,11 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
-  LayoutDashboard, Users, Calendar, Stethoscope, 
-  DollarSign, Package, MessageSquare, 
+  LayoutDashboard, Users, Calendar, 
+  DollarSign, Package, 
   LogOut, ShieldCheck,
   Settings, Sparkles,
-  MessageCircle, Megaphone // ✅ Importado o ícone de Megaphone
+  MessageCircle, Megaphone
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -23,7 +23,7 @@ interface MenuItem {
 
 export function Sidebar() {
   const location = useLocation();
-  const userRole = localStorage.getItem('user_role') || 'admin'; // Padrão admin para demo
+  const userRole = localStorage.getItem('user_role') || 'admin';
 
   const handleLogout = () => {
     localStorage.clear();
@@ -34,21 +34,17 @@ export function Sidebar() {
     { title: 'Dashboard', icon: LayoutDashboard, path: '/app' },
     { title: 'Agenda', icon: Calendar, path: '/app/agenda' },
     { title: 'Pacientes', icon: Users, path: '/app/pacientes' },
-    { title: 'Odontograma', icon: Stethoscope, path: '/app/odontograma' },
+    // Odontograma removido conforme solicitado
   ];
 
   const adminItems: MenuItem[] = [
     { title: 'Financeiro', icon: DollarSign, path: '/app/financeiro' },
     { title: 'Estoque', icon: Package, path: '/app/estoque' },
     { title: 'Gestão da Equipe', icon: ShieldCheck, path: '/app/gestao-equipe' },
-    { title: 'AtendeChat IA', icon: MessageSquare, path: '/app/atende-chat' },
+    // AtendeChat IA removido conforme solicitado
 
-    // ✅ WhatsApp (Módulo de Chat)
     { title: 'WhatsApp', icon: MessageCircle, path: '/app/whatsapp' },
-
-    // ✅ [NOVO] Marketing & CRM (Automação de Recall)
     { title: 'Marketing & CRM', icon: Megaphone, path: '/app/marketing' },
-
     { title: 'Configurações', icon: Settings, path: '/app/configuracoes' },
   ];
 
@@ -83,22 +79,6 @@ export function Sidebar() {
                 <item.icon size={20} className={isActive ? 'text-white' : 'group-hover:text-blue-400'} />
                 <span className="font-black text-[11px] uppercase tracking-widest">{item.title}</span>
               </Link>
-              
-              {item.submenu && location.pathname.startsWith(item.path) && (
-                <div className="ml-8 mt-3 space-y-3 border-l-2 border-slate-800 pl-6 animate-in slide-in-from-top-2 duration-300">
-                  {item.submenu.map((sub) => (
-                    <Link 
-                      key={sub.path} 
-                      to={sub.path}
-                      className={`block text-[10px] font-black uppercase tracking-tighter transition-colors ${
-                        location.pathname === sub.path ? 'text-blue-400' : 'text-slate-600 hover:text-slate-300'
-                      }`}
-                    >
-                      {sub.title}
-                    </Link>
-                  ))}
-                </div>
-              )}
             </div>
           );
         })}

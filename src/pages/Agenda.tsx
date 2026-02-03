@@ -1,99 +1,170 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Calendar as CalIcon, ChevronLeft, ChevronRight, Plus, 
-  Check, Clock, AlertCircle, Loader2, X 
+  Check, Clock, AlertCircle, Loader2, X, Trash2
 } from 'lucide-react';
 
-type Status = 'confirmed' | 'pending' | 'canceled' | 'completed';
+type Status = 'scheduled' | 'confirmed' | 'done' | 'cancelled';
 
 interface Appointment {
-  id: string; 
-  patient: string; 
-  procedure: string; 
-  day: number; 
-  hour: number; 
-  duration: number; 
+  id: number;
+  title: string;
+  description: string;
+  start: string;
+  end: string;
   status: Status;
+  patient_id?: number;
+  lead_id?: number;
 }
 
 export function Agenda() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentDate, setCurrentDate] = useState(new Date());
   
-  // ESTADOS PARA O NOVO AGENDAMENTO
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [newAppt, setNewAppt] = useState({ 
-    patient_name: '', 
-    procedure: 'Avaliação', 
-    date: '', 
+  const [selectedAppt, setSelectedAppt] = useState<Appointment | null>(null);
+  
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    date: new Date().toISOString().split('T')[0],
     time: '09:00',
-    duration: 1 
+    duration: '1',
+    status: 'scheduled' as Status
   });
 
-  const fetchAgenda = async () => {
+  const fetchAgenda = useCallback(async () => {
     try {
       const token = localStorage.getItem('odonto_token');
+      // Fetch for the current week or month
       const res = await fetch('/api/appointments', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         setAppointments(data);
-      } else {
-        // Fallback para visualização inicial
-        setAppointments([
-          { id: '1', patient: 'Carlos Eduardo', procedure: 'Avaliação Geral', day: 1, hour: 9, duration: 1, status: 'confirmed' },
-          { id: '2', patient: 'Mariana Souza', procedure: 'Clareamento', day: 1, hour: 14, duration: 2, status: 'confirmed' },
-          { id: '3', patient: 'Roberto Lima', procedure: 'Extração', day: 2, hour: 10, duration: 1, status: 'pending' },
-        ]);
       }
     } catch (error) {
       console.error("Erro ao carregar agenda", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { fetchAgenda(); }, []);
+  useEffect(() => { fetchAgenda(); }, [fetchAgenda]);
 
-  // FUNÇÃO PARA SALVAR NO BANCO
-  const handleCreateAppointment = async (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const res = await fetch('/api/appointments', {
-        method: 'POST',
+      const token = localStorage.getItem('odonto_token');
+      const start = `${formData.date}T${formData.time}:00`;
+      
+      const payload = {
+        title: formData.title,
+        description: formData.description,
+        start: start,
+        duration: formData.duration,
+        status: formData.status
+      };
+
+      const url = selectedAppt ? `/api/appointments/${selectedAppt.id}` : '/api/appointments';
+      const method = selectedAppt ? 'PATCH' : 'POST';
+
+      const res = await fetch(url, {
+        method,
         headers: { 
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('odonto_token')}` 
+          'Authorization': `Bearer ${token}` 
         },
-        body: JSON.stringify(newAppt)
+        body: JSON.stringify(payload)
       });
+
       if (res.ok) {
         setIsModalOpen(false);
-        fetchAgenda(); // Recarrega a grade com o novo paciente
+        setSelectedAppt(null);
+        fetchAgenda();
       }
     } catch (error) {
-      console.error("Erro ao agendar:", error);
+      console.error("Erro ao salvar:", error);
     } finally {
       setSaving(false);
     }
   };
 
+  const handleDelete = async (id: number) => {
+    if (!window.confirm("Excluir este agendamento?")) return;
+    try {
+      const token = localStorage.getItem('odonto_token');
+      await fetch(`/api/appointments/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      fetchAgenda();
+      setIsModalOpen(false);
+      setSelectedAppt(null);
+    } catch (error) {
+      console.error("Erro ao excluir:", error);
+    }
+  };
+
+  const openCreateModal = (date?: string, time?: string) => {
+    setSelectedAppt(null);
+    setFormData({
+      title: '',
+      description: '',
+      date: date || new Date().toISOString().split('T')[0],
+      time: time || '09:00',
+      duration: '1',
+      status: 'scheduled'
+    });
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (appt: Appointment) => {
+    setSelectedAppt(appt);
+    const dt = new Date(appt.start);
+    setFormData({
+      title: appt.title,
+      description: appt.description,
+      date: dt.toISOString().split('T')[0],
+      time: dt.toTimeString().slice(0, 5),
+      duration: '1', // Simplified
+      status: appt.status
+    });
+    setIsModalOpen(true);
+  };
+
+  // Calendar Helpers
   const hours = Array.from({ length: 11 }, (_, i) => i + 8);
-  const weekDays = [
-    { day: 1, label: 'Seg', date: '26' }, { day: 2, label: 'Ter', date: '27' },
-    { day: 3, label: 'Qua', date: '28' }, { day: 4, label: 'Qui', date: '29' },
-    { day: 5, label: 'Sex', date: '30' },
-  ];
+  
+  const getStartOfWeek = (date: Date) => {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
+    return new Date(d.setDate(diff));
+  };
+
+  const startOfWeek = getStartOfWeek(currentDate);
+  const weekDays = Array.from({ length: 5 }, (_, i) => {
+    const d = new Date(startOfWeek);
+    d.setDate(d.getDate() + i);
+    return {
+      day: i + 1,
+      label: ['Seg', 'Ter', 'Qua', 'Qui', 'Sex'][i],
+      date: d.getDate().toString(),
+      fullDate: d.toISOString().split('T')[0]
+    };
+  });
 
   const getStatusColor = (status: Status) => {
     switch(status) {
       case 'confirmed': return 'bg-blue-50 border-blue-200 text-blue-700';
-      case 'pending': return 'bg-orange-50 border-orange-200 text-orange-700';
-      case 'canceled': return 'bg-red-50 border-red-200 text-red-700 opacity-60';
+      case 'scheduled': return 'bg-orange-50 border-orange-200 text-orange-700';
+      case 'cancelled': return 'bg-red-50 border-red-200 text-red-700 opacity-60';
+      case 'done': return 'bg-green-50 border-green-200 text-green-700';
       default: return 'bg-gray-50 border-gray-200 text-gray-500';
     }
   };
@@ -107,57 +178,83 @@ export function Agenda() {
   return (
     <div className="flex flex-col h-screen bg-gray-50 p-8 font-sans overflow-hidden relative">
       
-      {/* MODAL DE NOVO HORÁRIO */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white p-8 rounded-[2.5rem] w-full max-w-md shadow-2xl animate-in zoom-in duration-200">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-black text-gray-800">Agendar Consulta</h3>
+              <h3 className="text-xl font-black text-gray-800">
+                {selectedAppt ? 'Editar Agendamento' : 'Novo Agendamento'}
+              </h3>
               <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
                 <X size={20} className="text-gray-400" />
               </button>
             </div>
             
-            <form onSubmit={handleCreateAppointment} className="space-y-4">
+            <form onSubmit={handleSave} className="space-y-4">
               <div className="space-y-1">
-                <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Paciente</label>
+                <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Título / Paciente</label>
                 <input 
                   required
-                  placeholder="Nome do Paciente" 
+                  placeholder="Ex: João Silva - Avaliação" 
                   className="w-full p-3 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                  value={newAppt.patient_name}
-                  onChange={e => setNewAppt({...newAppt, patient_name: e.target.value})}
+                  value={formData.title}
+                  onChange={e => setFormData({...formData, title: e.target.value})}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Data</label>
-                  <input type="date" required className="w-full p-3 bg-gray-50 border rounded-xl outline-none" onChange={e => setNewAppt({...newAppt, date: e.target.value})} />
+                  <input type="date" required className="w-full p-3 bg-gray-50 border rounded-xl outline-none" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Horário</label>
-                  <input type="time" required className="w-full p-3 bg-gray-50 border rounded-xl outline-none" value={newAppt.time} onChange={e => setNewAppt({...newAppt, time: e.target.value})} />
+                  <input type="time" required className="w-full p-3 bg-gray-50 border rounded-xl outline-none" value={formData.time} onChange={e => setFormData({...formData, time: e.target.value})} />
                 </div>
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Procedimento</label>
-                <select className="w-full p-3 bg-gray-50 border rounded-xl outline-none" value={newAppt.procedure} onChange={e => setNewAppt({...newAppt, procedure: e.target.value})}>
-                  <option value="Avaliação">Avaliação</option>
-                  <option value="Limpeza">Limpeza</option>
-                  <option value="Extração">Extração</option>
-                  <option value="Clareamento">Clareamento</option>
+                <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Procedimento / Notas</label>
+                <textarea 
+                  className="w-full p-3 bg-gray-50 border rounded-xl outline-none" 
+                  rows={2}
+                  value={formData.description} 
+                  onChange={e => setFormData({...formData, description: e.target.value})}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Status</label>
+                <select 
+                  className="w-full p-3 bg-gray-50 border rounded-xl outline-none" 
+                  value={formData.status} 
+                  onChange={e => setFormData({...formData, status: e.target.value as Status})}
+                >
+                  <option value="scheduled">Agendado</option>
+                  <option value="confirmed">Confirmado</option>
+                  <option value="done">Concluído</option>
+                  <option value="cancelled">Cancelado</option>
                 </select>
               </div>
 
-              <button 
-                type="submit" 
-                disabled={saving}
-                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest mt-4 shadow-xl shadow-blue-100 flex items-center justify-center gap-2"
-              >
-                {saving ? <Loader2 className="animate-spin" /> : 'Confirmar Agendamento'}
-              </button>
+              <div className="flex gap-3 mt-4">
+                {selectedAppt && (
+                  <button 
+                    type="button"
+                    onClick={() => handleDelete(selectedAppt.id)}
+                    className="p-4 bg-red-50 text-red-600 rounded-2xl hover:bg-red-100 transition-colors"
+                  >
+                    <Trash2 size={20} />
+                  </button>
+                )}
+                <button 
+                  type="submit" 
+                  disabled={saving}
+                  className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-blue-100 flex items-center justify-center gap-2"
+                >
+                  {saving ? <Loader2 className="animate-spin" /> : 'Salvar'}
+                </button>
+              </div>
             </form>
           </div>
         </div>
@@ -176,13 +273,32 @@ export function Agenda() {
 
         <div className="flex items-center gap-4">
           <div className="flex items-center bg-white p-1 rounded-2xl shadow-sm border border-gray-100">
-            <button className="p-2 hover:bg-gray-50 text-gray-400 rounded-xl transition-all"><ChevronLeft size={20} /></button>
-            <span className="font-black text-gray-700 px-4 text-xs uppercase tracking-widest">Janeiro, 2026</span>
-            <button className="p-2 hover:bg-gray-50 text-gray-400 rounded-xl transition-all"><ChevronRight size={20} /></button>
+            <button 
+              onClick={() => {
+                const d = new Date(currentDate);
+                d.setDate(d.getDate() - 7);
+                setCurrentDate(d);
+              }}
+              className="p-2 hover:bg-gray-50 text-gray-400 rounded-xl transition-all"
+            >
+              <ChevronLeft size={20} />
+            </button>
+            <span className="font-black text-gray-700 px-4 text-xs uppercase tracking-widest">
+              {currentDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+            </span>
+            <button 
+              onClick={() => {
+                const d = new Date(currentDate);
+                d.setDate(d.getDate() + 7);
+                setCurrentDate(d);
+              }}
+              className="p-2 hover:bg-gray-50 text-gray-400 rounded-xl transition-all"
+            >
+              <ChevronRight size={20} />
+            </button>
           </div>
-          {/* BOTÃO AGORA ATIVA O MODAL */}
           <button 
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => openCreateModal()}
             className="bg-blue-600 text-white px-6 py-3 rounded-2xl flex items-center gap-2 hover:bg-blue-700 shadow-xl shadow-blue-100 text-xs font-black uppercase tracking-widest transition-all active:scale-95"
           >
             <Plus size={18} /> Novo Horário
@@ -196,7 +312,7 @@ export function Agenda() {
           {weekDays.map(d => (
             <div key={d.day} className="p-4 text-center border-r border-gray-100 last:border-0">
               <span className="text-[10px] text-gray-400 uppercase font-black tracking-widest block mb-1">{d.label}</span>
-              <div className={`w-8 h-8 mx-auto flex items-center justify-center rounded-2xl font-black text-sm transition-all ${d.date === '28' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-gray-800 hover:bg-gray-200'}`}>
+              <div className={`w-8 h-8 mx-auto flex items-center justify-center rounded-2xl font-black text-sm transition-all ${d.fullDate === new Date().toISOString().split('T')[0] ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-gray-800 hover:bg-gray-200'}`}>
                 {d.date}
               </div>
             </div>
@@ -216,30 +332,32 @@ export function Agenda() {
             {weekDays.map(dayInfo => (
               <div key={dayInfo.day} className="border-r border-gray-100 last:border-0 relative bg-white">
                 {hours.map(hour => {
-                  const appt = appointments.find(a => a.day === dayInfo.day && a.hour === hour);
+                  const hourStr = hour.toString().padStart(2, '0');
+                  const appt = appointments.find(a => {
+                    const d = new Date(a.start);
+                    return d.toISOString().split('T')[0] === dayInfo.fullDate && d.getHours() === hour;
+                  });
+                  
                   return (
                     <div key={`${dayInfo.day}-${hour}`} className="h-24 border-b border-gray-50 border-dashed relative group hover:bg-blue-50/20 transition-colors">
                       {!appt && (
-                        <button onClick={() => {
-                          setNewAppt({...newAppt, time: `${hour.toString().padStart(2, '0')}:00`});
-                          setIsModalOpen(true);
-                        }} className="absolute inset-0 w-full h-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                        <button onClick={() => openCreateModal(dayInfo.fullDate, `${hourStr}:00`)} className="absolute inset-0 w-full h-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                           <Plus size={20} className="text-blue-300"/>
                         </button>
                       )}
                       {appt && (
                         <div 
+                          onClick={() => openEditModal(appt)}
                           className={`absolute inset-x-2 inset-y-2 rounded-[1.5rem] p-4 border-l-4 shadow-sm cursor-pointer z-10 transition-all hover:shadow-md hover:scale-[1.02] ${getStatusColor(appt.status)}`}
-                          style={{ height: `${appt.duration * 96 - 16}px` }} 
                         >
-                          <div className="flex justify-between items-start mb-2">
+                          <div className="flex justify-between items-start mb-1">
                             <span className="text-[9px] font-black uppercase tracking-widest flex items-center gap-1 opacity-70">
                                {appt.status === 'confirmed' ? <Check size={10} /> : <Clock size={10} />}
-                               {appt.hour}:00
+                               {new Date(appt.start).toTimeString().slice(0, 5)}
                             </span>
                           </div>
-                          <p className="font-black text-xs text-gray-800 leading-tight mb-1">{appt.patient}</p>
-                          <p className="text-[10px] font-bold opacity-60 uppercase tracking-tighter">{appt.procedure}</p>
+                          <p className="font-black text-xs text-gray-800 leading-tight mb-1 truncate">{appt.title}</p>
+                          <p className="text-[10px] font-bold opacity-60 uppercase tracking-tighter truncate">{appt.description}</p>
                         </div>
                       )}
                     </div>
