@@ -23,8 +23,9 @@ const MarketingPage: React.FC = () => {
     mensagem: 'Olá {nome}, faz tempo que não te vemos! Vamos cuidar desse sorriso? 🦷'
   });
 
-  // URL da API (Ajuste se seu backend rodar em outra porta)
-  const API_URL = 'http://localhost:5000/api/marketing'; 
+  // ✅ CORREÇÃO APLICADA: URL Relativa
+  // Ao usar apenas "/api/marketing", funciona tanto localmente quanto no Render (HTTPS).
+  const API_URL = '/api/marketing'; 
   
   // Pega o token salvo no login (mesma chave usada no App.tsx)
   const token = localStorage.getItem('odonto_token'); 
