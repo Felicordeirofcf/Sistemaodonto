@@ -1,9 +1,13 @@
 from flask import Blueprint, request, jsonify, redirect, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models import db, Campaign, Lead, LeadEvent, LeadStatus, WhatsAppConnection
-import shortuuid  # pip install shortuuid
-import qrcode     # pip install qrcode[pil]
+import shortuuid
+import qrcode
 from io import BytesIO
+import logging
+
+# Configuração de Logs
+logger = logging.getLogger(__name__)
 
 bp = Blueprint('marketing_campaigns', __name__)
 
@@ -15,16 +19,15 @@ bp = Blueprint('marketing_campaigns', __name__)
 @jwt_required()
 def create_campaign():
     identity = get_jwt_identity()
-    # Garante que pega o clinic_id do token (segurança) ou fallback para 1 em dev
     clinic_id = identity.get('clinic_id') if isinstance(identity, dict) else 1
     
     data = request.get_json()
     
-    # Gera código único curto (ex: 3k9z) para rastreio
+    # Gera código único de 5 caracteres
     code = shortuuid.ShortUUID().random(length=5)
     
-    # Monta a mensagem padrão com o "Token Mágico" [ref:CODE]
-    msg_template = data.get('message', "Olá, gostaria de saber mais sobre a promoção.")
+    # Garante o token [ref:CODE] na mensagem
+    msg_template = data.get('message', "Olá, gostaria de saber mais.")
     if f"[ref:{code}]" not in msg_template:
         msg_template += f" [ref:{code}]"
 
@@ -41,7 +44,10 @@ def create_campaign():
     db.session.add(new_campaign)
     db.session.commit()
     
+    # Monta URLs absolutas
     base_url = request.host_url.rstrip('/')
+    
+    logger.info(f"✅ Campanha Criada: {new_campaign.name} | Code: {code}")
     
     return jsonify({
         "id": new_campaign.id,
@@ -53,7 +59,6 @@ def create_campaign():
         "leads": 0
     }), 201
 
-# ✅ NOVA ROTA: LISTAR CAMPANHAS (Resolvendo o erro 404)
 @bp.route('/campaigns', methods=['GET'])
 @jwt_required()
 def list_campaigns():
@@ -61,7 +66,6 @@ def list_campaigns():
     clinic_id = identity.get('clinic_id') if isinstance(identity, dict) else 1
     
     campaigns = Campaign.query.filter_by(clinic_id=clinic_id).order_by(Campaign.created_at.desc()).all()
-    
     base_url = request.host_url.rstrip('/')
     
     return jsonify([{
@@ -69,7 +73,6 @@ def list_campaigns():
         "name": c.name,
         "tracking_code": c.tracking_code,
         "tracking_url": f"{base_url}/c/{c.tracking_code}",
-        "qr_code_url": f"{base_url}/api/marketing/campaigns/{c.id}/qr",
         "clicks": c.clicks_count,
         "leads": c.leads_count
     } for c in campaigns]), 200
@@ -79,29 +82,56 @@ def list_campaigns():
 # ==============================================================================
 @bp.route('/c/<code>', methods=['GET'])
 def track_click_and_redirect(code):
-    campaign = Campaign.query.filter_by(tracking_code=code).first_or_404()
+    print(f"🔎 [DEBUG] Tentando acessar campanha com código: {code}")
+    
+    # Busca a campanha (sem 404 automático para podermos tratar o erro)
+    campaign = Campaign.query.filter_by(tracking_code=code).first()
+    
+    if not campaign:
+        print(f"❌ [ERRO] Campanha {code} não encontrada no banco!")
+        # Retorna erro visível em vez de redirecionar para Home
+        return f"""
+        <div style="font-family:sans-serif; text-align:center; padding:50px;">
+            <h1>⚠️ Link Inválido ou Expirado</h1>
+            <p>Não encontramos a campanha com código: <strong>{code}</strong></p>
+            <p>Verifique se ela foi criada corretamente no painel.</p>
+        </div>
+        """, 404
     
     # 1. Registra Métrica
-    campaign.clicks_count += 1
-    
-    event = LeadEvent(
-        campaign_id=campaign.id,
-        event_type='click',
-        metadata_json={
-            'user_agent': request.headers.get('User-Agent'),
-            'ip': request.remote_addr
-        }
-    )
-    db.session.add(event)
-    db.session.commit()
-    
+    try:
+        campaign.clicks_count += 1
+        event = LeadEvent(
+            campaign_id=campaign.id,
+            event_type='click',
+            metadata_json={
+                'user_agent': request.headers.get('User-Agent'),
+                'ip': request.remote_addr
+            }
+        )
+        db.session.add(event)
+        db.session.commit()
+    except Exception as e:
+        print(f"⚠️ Erro ao salvar métrica (mas vamos redirecionar): {e}")
+
     # 2. Descobre o número do WhatsApp da Clínica
-    connection = WhatsAppConnection.query.filter_by(clinic_id=campaign.clinic_id, status='connected').first()
+    # Tenta buscar conexão "connected" ou "CONNECTED"
+    target_phone = "5511999999999" # Fallback
     
-    # Fallback de segurança se não tiver conexão
-    target_phone = "5511999999999" 
-    if connection and connection.session_data:
-        target_phone = connection.session_data.get('me', {}).get('id', '').split('@')[0] or target_phone
+    try:
+        connection = WhatsAppConnection.query.filter(
+            WhatsAppConnection.clinic_id == campaign.clinic_id,
+            WhatsAppConnection.status.in_(['connected', 'CONNECTED'])
+        ).first()
+        
+        if connection and connection.session_data:
+            # Tenta pegar do session_data, ex: "551199999@s.whatsapp.net"
+            jid = connection.session_data.get('me', {}).get('id')
+            if jid:
+                target_phone = jid.split('@')[0]
+                print(f"✅ Redirecionando para WhatsApp da Clínica: {target_phone}")
+    except Exception as e:
+        print(f"⚠️ Erro ao buscar conexão: {e}")
 
     # 3. Redireciona
     import urllib.parse
@@ -116,7 +146,6 @@ def track_click_and_redirect(code):
 @bp.route('/campaigns/<int:campaign_id>/qr', methods=['GET'])
 def get_qr_code(campaign_id):
     camp = Campaign.query.get_or_404(campaign_id)
-    
     base_url = request.host_url.rstrip('/')
     link = f"{base_url}/c/{camp.tracking_code}"
     
