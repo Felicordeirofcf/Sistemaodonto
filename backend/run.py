@@ -1,6 +1,7 @@
 import os
 from app import create_app
-from app.tasks.scheduler import start_scheduler
+# CORREÇÃO AQUI: Mudamos de 'tasks' para 'task' (singular, igual na sua imagem)
+from app.task.scheduler import start_scheduler 
 
 app = create_app()
 
