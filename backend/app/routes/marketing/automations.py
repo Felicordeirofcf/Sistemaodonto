@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models import db, AutomacaoRecall, CRMStage, CRMCard, Patient
+from app.models import db, AutomacaoRecall, CRMStage, CRMCard, Patient, Lead, Campaign
 from datetime import datetime
 
 bp = Blueprint("marketing_automations", __name__)
@@ -32,8 +32,10 @@ def _is_valid_time_hhmm(value: str) -> bool:
 def _clamp_int(value, default=180, min_v=1, max_v=3650):
     try:
         v = int(value)
-        if v < min_v: return min_v
-        if v > max_v: return max_v
+        if v < min_v:
+            return min_v
+        if v > max_v:
+            return max_v
         return v
     except Exception:
         return default
@@ -47,7 +49,6 @@ def _clamp_int(value, default=180, min_v=1, max_v=3650):
 @jwt_required()
 def list_automations():
     clinic_id = _get_clinic_id_from_jwt()
-
     regras = AutomacaoRecall.query.filter_by(clinic_id=clinic_id).order_by(AutomacaoRecall.id.desc()).all()
 
     return jsonify([{
@@ -94,14 +95,6 @@ def create_automation():
 @bp.route('/automations/<int:id>', methods=['PATCH'])
 @jwt_required()
 def update_automation(id):
-    """
-    Atualiza parcialmente uma regra:
-    - nome
-    - dias_ausente
-    - horario
-    - mensagem
-    - ativo
-    """
     clinic_id = _get_clinic_id_from_jwt()
     data = _get_json_or_none()
     if data is None:
@@ -115,7 +108,10 @@ def update_automation(id):
         regra.nome = (data.get("nome") or "Nova Regra").strip()
 
     if "dias_ausente" in data:
-        regra.dias_ausente = _clamp_int(data.get("dias_ausente", regra.dias_ausente), default=regra.dias_ausente)
+        regra.dias_ausente = _clamp_int(
+            data.get("dias_ausente", regra.dias_ausente),
+            default=regra.dias_ausente
+        )
 
     if "horario" in data:
         horario = (data.get("horario") or "").strip()
@@ -185,18 +181,33 @@ def get_crm_board():
 
     stage_ids = [e.id for e in estagios]
 
-    # 2) Busca cards da clínica em lote
+    # 2) Cards da clínica em lote
     cards = CRMCard.query.filter(
         CRMCard.clinic_id == clinic_id,
         CRMCard.stage_id.in_(stage_ids)
     ).all()
 
     # 3) Pacientes em lote
-    paciente_ids = {c.paciente_id for c in cards if getattr(c, "paciente_id", None)}
+    paciente_ids = {getattr(c, "paciente_id", None) for c in cards if getattr(c, "paciente_id", None)}
     pacientes = Patient.query.filter(Patient.id.in_(paciente_ids)).all() if paciente_ids else []
     pacientes_map = {p.id: p for p in pacientes}
 
-    # 4) Indexa por stage
+    # --------------------------------------------------------------------------
+    # NOVO: Campanha/Origem por telefone (Lead -> Campaign)
+    # --------------------------------------------------------------------------
+    phones = {getattr(c, "paciente_phone", None) for c in cards if getattr(c, "paciente_phone", None)}
+    leads = Lead.query.filter(
+        Lead.clinic_id == clinic_id,
+        Lead.phone.in_(phones)
+    ).all() if phones else []
+
+    lead_by_phone = {l.phone: l for l in leads}
+
+    campaign_ids = {l.campaign_id for l in leads if getattr(l, "campaign_id", None)}
+    campaigns = Campaign.query.filter(Campaign.id.in_(campaign_ids)).all() if campaign_ids else []
+    campaign_map = {c.id: c for c in campaigns}
+
+    # 4) Indexa cards por stage
     cards_by_stage = {sid: [] for sid in stage_ids}
     for card in cards:
         cards_by_stage.setdefault(card.stage_id, []).append(card)
@@ -205,18 +216,36 @@ def get_crm_board():
     board_data = []
     for estagio in estagios:
         cards_data = []
+
         for card in cards_by_stage.get(estagio.id, []):
             paciente = pacientes_map.get(getattr(card, "paciente_id", None))
 
             ultima = getattr(card, "ultima_interacao", None)
             ultima_fmt = ultima.strftime("%d/%m %H:%M") if ultima else ""
 
+            phone = getattr(card, "paciente_phone", "") or ""
+            lead = lead_by_phone.get(phone)
+
+            campanha_nome = ""
+            origem = ""
+
+            if lead:
+                origem = (getattr(lead, "source", "") or "")
+                camp_id = getattr(lead, "campaign_id", None)
+                if camp_id:
+                    camp = campaign_map.get(camp_id)
+                    campanha_nome = camp.name if camp else ""
+
             cards_data.append({
                 "id": card.id,
                 "paciente_nome": (paciente.name if paciente else (getattr(card, "paciente_nome", None) or "Desconhecido")),
                 "paciente_phone": (paciente.phone if paciente else (getattr(card, "paciente_phone", None) or "")),
                 "ultima_interacao": ultima_fmt,
-                "status": card.status
+                "status": card.status,
+
+                # NOVOS CAMPOS
+                "campanha": campanha_nome,
+                "origem": origem
             })
 
         board_data.append({
