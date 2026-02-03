@@ -35,7 +35,7 @@ class Clinic(db.Model):
     crm_cards = db.relationship("CRMCard", backref="clinic", lazy=True)
     automations = db.relationship("AutomacaoRecall", backref="clinic", lazy=True)
 
-    # ✅ NOVO: Relacionamentos Marketing (Campanhas e Leads)
+    # Relacionamentos Marketing (Campanhas e Leads)
     marketing_campaigns = db.relationship("Campaign", backref="clinic", lazy=True)
     marketing_leads = db.relationship("Lead", backref="clinic", lazy=True)
 
@@ -84,19 +84,14 @@ class Patient(db.Model):
     status = db.Column(db.String(20), default="ativo")
 
     odontogram_data = db.Column(db.JSON, nullable=True)
-
     last_visit = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # CONTROLE DE MARKETING
     receive_marketing = db.Column(db.Boolean, default=True) 
 
     clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Paciente pode ter vários contatos whatsapp associados
     whatsapp_contacts = db.relationship("WhatsAppContact", backref="patient", lazy=True)
-    
-    # Relacionamento com CRM
     crm_cards = db.relationship("CRMCard", backref="patient", lazy=True)
 
     def to_dict(self):
@@ -137,7 +132,6 @@ class Appointment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
     date_time = db.Column(db.DateTime, nullable=False)
-
     patient_name = db.Column(db.String(100))
     procedure = db.Column(db.String(100))
     status = db.Column(db.String(20), default="confirmed")
@@ -174,14 +168,18 @@ class Transaction(db.Model):
 # =========================================================
 # 7) WHATSAPP / MARKETING CORE
 # =========================================================
-
 class WhatsAppConnection(db.Model):
     __tablename__ = "whatsapp_connections"
     id = db.Column(db.Integer, primary_key=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=False, index=True)
+    
+    # Nome da instância na Evolution (ex: clinica_v3_1)
+    instance_name = db.Column(db.String(50), unique=True, index=True) 
+    
     provider = db.Column(db.String(20), nullable=False, default="qr")
     status = db.Column(db.String(20), nullable=False, default="disconnected")
     session_data = db.Column(db.JSON, nullable=True)
+    
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -231,9 +229,8 @@ class ScheduledMessage(db.Model):
 
 
 # =========================================================
-# 8) CRM & AUTOMAÇÃO (INTERNO)
+# 8) CRM & AUTOMAÇÃO
 # =========================================================
-
 class AutomacaoRecall(db.Model):
     __tablename__ = 'automacoes_recall'
     id = db.Column(db.Integer, primary_key=True)
@@ -260,10 +257,19 @@ class CRMCard(db.Model):
     __tablename__ = 'crm_cards'
     id = db.Column(db.Integer, primary_key=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
-    paciente_id = db.Column(db.Integer, db.ForeignKey('patients.id'))
+    
+    # Suporte a Leads que ainda não são pacientes cadastrados
+    paciente_id = db.Column(db.Integer, db.ForeignKey('patients.id'), nullable=True)
+    paciente_nome = db.Column(db.String(100)) 
+    paciente_phone = db.Column(db.String(30)) 
+    
     stage_id = db.Column(db.Integer, db.ForeignKey('crm_stages.id'))
+    historico_conversas = db.Column(db.Text) 
+    valor_proposta = db.Column(db.Float, default=0.0)
+    
     ultima_interacao = db.Column(db.DateTime, default=datetime.utcnow)
     status = db.Column(db.String(20), default='open') # open, won, lost
+    
     history = db.relationship("CRMHistory", backref="card", lazy=True)
     stage = db.relationship("CRMStage", backref="cards", lazy=True)
 
@@ -280,8 +286,6 @@ class CRMHistory(db.Model):
 # =========================================================
 # 9) MARKETING AVANÇADO (LEADS & CAMPANHAS)
 # =========================================================
-
-# Helper para status (não é tabela, só constantes)
 class LeadStatus:
     NEW = 'novo'
     IN_CHAT = 'em_atendimento'
@@ -297,21 +301,18 @@ class Campaign(db.Model):
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False, index=True)
     
     name = db.Column(db.String(100), nullable=False)
-    slug = db.Column(db.String(50), unique=True, index=True) # Ex: /l/promo-verao
-    tracking_code = db.Column(db.String(20), unique=True, index=True) # Ex: /c/xYz12
+    slug = db.Column(db.String(50), unique=True, index=True)
+    tracking_code = db.Column(db.String(20), unique=True, index=True)
     
-    # Configuração
-    whatsapp_message_template = db.Column(db.Text) # Ex: "Olá, vi a campanha [ref:xYz12]..."
-    landing_page_data = db.Column(db.JSON) # JSON com título, cor, texto da landing simples
+    whatsapp_message_template = db.Column(db.Text)
+    landing_page_data = db.Column(db.JSON)
     
-    # Métricas Cacheadas (contador simples)
     clicks_count = db.Column(db.Integer, default=0)
     leads_count = db.Column(db.Integer, default=0)
     
     active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Relacionamento com Leads
     leads = db.relationship('Lead', backref='campaign', lazy='dynamic')
 
 
@@ -323,21 +324,19 @@ class Lead(db.Model):
     campaign_id = db.Column(db.Integer, db.ForeignKey('marketing_campaigns.id'), nullable=True)
     
     name = db.Column(db.String(100), nullable=True)
-    phone = db.Column(db.String(30), nullable=False, index=True) # Principal identificador
+    phone = db.Column(db.String(30), nullable=False, index=True)
     
     status = db.Column(db.String(20), default=LeadStatus.NEW)
-    source = db.Column(db.String(50)) # 'whatsapp', 'landing_page', 'manual'
+    source = db.Column(db.String(50))
     
-    # Estado do Chatbot
     chatbot_state = db.Column(db.String(50), default='START') 
-    chatbot_data = db.Column(db.JSON, default={}) # Dados coletados: { "interesse": "implante" }
+    chatbot_data = db.Column(db.JSON, default={})
     
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class LeadEvent(db.Model):
-    """Log de eventos para analytics (clique, mensagem, mudança de status)"""
     __tablename__ = 'marketing_lead_events'
     
     id = db.Column(db.Integer, primary_key=True)

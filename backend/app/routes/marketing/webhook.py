@@ -8,20 +8,19 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint('marketing_webhook', __name__)
 
-# Configurações da API
+# Configurações da API Evolution
 EVOLUTION_API_URL = os.getenv("WHATSAPP_QR_SERVICE_URL", "http://localhost:8080").rstrip("/")
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "")
 
-# Palavras que ATIVAM o robô
+# Palavras que ATIVAM o robô (Filtro para evitar responder amigos/contatos pessoais)
 GATILHOS_BOT = [
     "olá", "ola", "oi", "bom dia", "boa tarde", "boa noite", 
     "tudo bem", "agendar", "marcar", "consulta", "preço", 
     "valor", "doutor", "dentista", "endereço", "avaliac", "avaliaç"
 ]
 
-# --- ROTA DUPLA (ACEITA AS DUAS FORMAS) ---
 @bp.route('/webhook/whatsapp', methods=['POST'])
-@bp.route('/webhook/whatsapp/messages-upsert', methods=['POST']) # <--- Adicionei essa linha para corrigir o erro 405
+@bp.route('/webhook/whatsapp/messages-upsert', methods=['POST'])
 def whatsapp_webhook():
     data = request.get_json()
     
@@ -30,16 +29,16 @@ def whatsapp_webhook():
 
     payload = data['data']
     
-    # Verifica se é mensagem enviada por mim (ignora)
+    # 1. Ignora mensagens enviadas pelo próprio número da clínica
     if 'key' not in payload or payload['key'].get('fromMe') == True:
         return jsonify({"status": "ignored", "reason": "from_me"}), 200
 
-    # Dados da Mensagem
+    # 2. Extração de dados do Lead
     remote_jid = payload['key'].get('remoteJid') 
     phone = remote_jid.split('@')[0]
     push_name = payload.get('pushName', 'Paciente')
     
-    # Extrai texto
+    # Captura o texto da mensagem (suporta diferentes formatos da API)
     message_text = ""
     if 'message' in payload:
         msg = payload['message']
@@ -52,11 +51,12 @@ def whatsapp_webhook():
     if not message_text:
         return jsonify({"status": "ignored", "reason": "no text"}), 200
 
-    # --- AUTO-RECOVERY DA CONEXÃO ---
+    # 3. Localização da Clínica (Foco em Clínica ID 1 para ambiente único)
     conn = WhatsAppConnection.query.filter_by(status='connected').first()
     
+    # Auto-Recovery: Se a conexão sumiu do banco mas a API está ativa, recupera agora
     if not conn:
-        print("⚠️ Conexão não encontrada no DB. Buscando na API...")
+        logger.info("⚠️ Conexão não encontrada no DB. Tentando recuperar via Evolution API...")
         try:
             url = f"{EVOLUTION_API_URL}/instance/fetchInstances"
             headers = {"apikey": EVOLUTION_API_KEY}
@@ -64,52 +64,47 @@ def whatsapp_webhook():
             
             if resp.status_code == 200:
                 instances = resp.json()
-                active_instance = next((i for i in instances if i.get('instance', {}).get('status') == 'open'), None)
+                # Busca qualquer instância com status 'open' ou 'connected'
+                active_instance = next((i for i in instances if i.get('instance', {}).get('status') in ['open', 'connected']), None)
                 
                 if active_instance:
-                    owner_jid = active_instance['instance']['owner']
-                    instance_name = active_instance['instance']['instanceName']
+                    inst_data = active_instance['instance']
+                    instance_name = inst_data['instanceName']
+                    owner_jid = inst_data.get('owner') or inst_data.get('jid')
                     
-                    conn = WhatsAppConnection.query.filter_by(instance_name=instance_name).first()
-                    if not conn:
-                        conn = WhatsAppConnection(
-                            clinic_id=1,
-                            instance_name=instance_name,
-                            status='connected',
-                            session_data={"me": {"id": owner_jid}}
-                        )
-                        db.session.add(conn)
-                    else:
-                        conn.status = 'connected'
-                        conn.session_data = {"me": {"id": owner_jid}}
-                    
+                    conn = WhatsAppConnection(
+                        clinic_id=1,
+                        instance_name=instance_name,
+                        status='connected',
+                        session_data={"me": {"id": owner_jid}}
+                    )
+                    db.session.add(conn)
                     db.session.commit()
-                    print(f"✅ Conexão recuperada e salva: {instance_name}")
+                    logger.info(f"✅ Conexão recuperada automaticamente: {instance_name}")
         except Exception as e:
-            print(f"❌ Erro ao tentar recuperar conexão: {e}")
+            logger.error(f"❌ Falha no Auto-Recovery do Webhook: {e}")
 
-    if not conn:
-        return jsonify({"status": "error", "reason": "no clinic connected"}), 200
+    # Fallback final se nada funcionar
+    clinic_id = conn.clinic_id if conn else 1
 
-    clinic_id = conn.clinic_id
-
-    # --- LÓGICA DE CRM ---
-    existing_card = CRMCard.query.join(CRMStage).filter(
-        CRMStage.clinic_id == clinic_id,
+    # 4. Lógica do CRM (Evita duplicidade de cards abertos)
+    existing_card = CRMCard.query.filter(
+        CRMCard.clinic_id == clinic_id,
         CRMCard.paciente_phone == phone,
-        CRMStage.is_success == False
+        CRMCard.status == 'open'
     ).first()
 
     if existing_card:
-        print(f"🔄 Paciente {phone} já no funil.")
+        logger.info(f"🔄 Lead {phone} já possui um card aberto no CRM.")
         return jsonify({"status": "ignored", "reason": "already in crm"}), 200
 
-    # Filtro de Gatilho
+    # 5. Filtro de Gatilho e Criação de Card
     eh_gatilho = any(palavra in message_text for palavra in GATILHOS_BOT)
     
     if eh_gatilho:
-        print(f"🤖 Novo Lead Detectado: {phone}")
+        logger.info(f"🤖 Novo Lead detectado via WhatsApp: {phone}")
         
+        # Localiza a etapa inicial do funil de vendas
         stage = CRMStage.query.filter_by(clinic_id=clinic_id, is_initial=True).first()
         if not stage:
             stage = CRMStage.query.filter_by(clinic_id=clinic_id).order_by(CRMStage.ordem).first()
@@ -117,17 +112,19 @@ def whatsapp_webhook():
         if stage:
             try:
                 novo_card = CRMCard(
+                    clinic_id=clinic_id,
                     stage_id=stage.id,
                     paciente_nome=push_name,
                     paciente_phone=phone,
-                    historico_conversas=f"WhatsApp: {message_text}",
-                    valor_proposta=0
+                    historico_conversas=f"Início via WhatsApp: {message_text}",
+                    valor_proposta=0,
+                    status='open'
                 )
                 db.session.add(novo_card)
                 db.session.commit()
-                print(f"✅ Card criado no CRM (ID: {novo_card.id})")
+                logger.info(f"✅ Card criado com sucesso no CRM (ID: {novo_card.id})")
             except Exception as e:
-                print(f"❌ Erro DB: {e}")
+                logger.error(f"❌ Erro ao salvar Lead no banco de dados: {e}")
                 db.session.rollback()
 
     return jsonify({"status": "processed"}), 200
