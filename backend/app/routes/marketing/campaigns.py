@@ -5,13 +5,20 @@ import shortuuid
 import qrcode
 from io import BytesIO
 import logging
+import urllib.parse
+import requests
+import os
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint('marketing_campaigns', __name__)
 
+# Configurações da API (Pega do .env ou usa padrão)
+EVOLUTION_API_URL = os.getenv("WHATSAPP_QR_SERVICE_URL", "http://localhost:8080").rstrip("/")
+EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "")
+
 # ==============================================================================
-# 1. GESTÃO DE CAMPANHAS (CRIAR, LISTAR, EDITAR, EXCLUIR)
+# 1. GESTÃO DE CAMPANHAS
 # ==============================================================================
 
 @bp.route('/campaigns', methods=['POST'])
@@ -64,75 +71,57 @@ def list_campaigns():
         "name": c.name,
         "tracking_code": c.tracking_code,
         "tracking_url": f"{base_url}/c/{c.tracking_code}",
-        "active": c.active,  # Retorna se está pausada ou não
+        "active": c.active,
         "clicks": c.clicks_count,
-        "leads": c.leads_count
+        "leads": c.leads_count,
+        "qr_code_url": f"{base_url}/api/marketing/campaigns/{c.id}/qr"
     } for c in campaigns]), 200
 
-# ✅ NOVA ROTA: ALTERAR STATUS (PAUSAR / RETOMAR)
 @bp.route('/campaigns/<int:id>/status', methods=['PATCH'])
 @jwt_required()
 def toggle_status(id):
     identity = get_jwt_identity()
     clinic_id = identity.get('clinic_id') if isinstance(identity, dict) else 1
-    
     camp = Campaign.query.filter_by(id=id, clinic_id=clinic_id).first_or_404()
-    data = request.get_json()
     
+    data = request.get_json()
     if 'active' in data:
         camp.active = bool(data['active'])
         db.session.commit()
-        
     return jsonify({"message": "Status atualizado", "active": camp.active}), 200
 
-# ✅ NOVA ROTA: EXCLUIR CAMPANHA
 @bp.route('/campaigns/<int:id>', methods=['DELETE'])
 @jwt_required()
 def delete_campaign(id):
     identity = get_jwt_identity()
     clinic_id = identity.get('clinic_id') if isinstance(identity, dict) else 1
-    
     camp = Campaign.query.filter_by(id=id, clinic_id=clinic_id).first_or_404()
     
     try:
-        # Primeiro, removemos os eventos e desvinculamos leads para não dar erro de chave estrangeira
         LeadEvent.query.filter_by(campaign_id=id).delete()
-        
-        # Opção A: Excluir os leads também? (Geralmente não, apenas desvincula)
-        # Leads vinculados ficam com campaign_id NULL
         leads = Lead.query.filter_by(campaign_id=id).all()
-        for lead in leads:
-            lead.campaign_id = None
-        
-        # Agora exclui a campanha
+        for lead in leads: lead.campaign_id = None
         db.session.delete(camp)
         db.session.commit()
-        return jsonify({"message": "Campanha excluída com sucesso"}), 200
+        return jsonify({"message": "Campanha excluída"}), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({"error": f"Erro ao excluir: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 500
 
 # ==============================================================================
-# 2. ROTA DE RASTREAMENTO
+# 2. ROTA DE RASTREAMENTO INTELIGENTE (SAAS)
 # ==============================================================================
 @bp.route('/c/<code>', methods=['GET'])
 def track_click_and_redirect(code):
     campaign = Campaign.query.filter_by(tracking_code=code).first()
     
-    # Se não existe
     if not campaign:
-        return f"<h1 style='text-align:center; margin-top:50px;'>⚠️ Link Inválido</h1>", 404
+        return "<h1 style='font-family:sans-serif;text-align:center;margin-top:50px;'>⚠️ Link Inválido ou Não Encontrado</h1>", 404
 
-    # ✅ Se estiver PAUSADA
     if not campaign.active:
-        return f"""
-        <div style="font-family:sans-serif; text-align:center; padding:50px;">
-            <h1>⏸️ Campanha Pausada</h1>
-            <p>Esta oferta não está mais disponível no momento.</p>
-        </div>
-        """, 200
+        return "<h1 style='font-family:sans-serif;text-align:center;margin-top:50px;'>⏸️ Campanha Pausada pelo Anunciante</h1>", 200
     
-    # 1. Registra Métrica
+    # 1. Registra o Clique (Métrica)
     try:
         campaign.clicks_count += 1
         event = LeadEvent(
@@ -142,19 +131,63 @@ def track_click_and_redirect(code):
         )
         db.session.add(event)
         db.session.commit()
-    except: pass
+    except Exception as e:
+        print(f"Erro ao salvar métrica: {e}")
 
-    # 2. Redireciona
-    target_phone = "5511999999999" # Fallback
-    try:
-        conn = WhatsAppConnection.query.filter_by(clinic_id=campaign.clinic_id, status='connected').first()
-        if conn and conn.session_data:
-            target_phone = conn.session_data.get('me', {}).get('id', '').split('@')[0] or target_phone
-    except: pass
+    # 2. Descobre o Número Automaticamente (Lógica SaaS)
+    target_phone = None
+    
+    # Busca conexão no banco
+    conn = WhatsAppConnection.query.filter_by(clinic_id=campaign.clinic_id).first()
+    
+    # TENTATIVA 1: O número já está salvo no banco?
+    if conn and conn.session_data:
+        me = conn.session_data.get('me', {})
+        jid = me.get('id') # ex: 5511999999999:2@s.whatsapp.net
+        if jid:
+            target_phone = jid.split('@')[0].split(':')[0]
+            print(f"✅ [CACHE] Número encontrado no banco: {target_phone}")
 
-    import urllib.parse
+    # TENTATIVA 2: Se não tem no banco, busca na Evolution API agora
+    if not target_phone and conn:
+        print(f"🔄 [API] Buscando número na Evolution para instância: {conn.instance_name}")
+        try:
+            url = f"{EVOLUTION_API_URL}/instance/fetchInstances"
+            headers = {"apikey": EVOLUTION_API_KEY}
+            resp = requests.get(url, headers=headers, timeout=5)
+            
+            if resp.status_code == 200:
+                instances = resp.json()
+                # Procura a instância correta na lista
+                my_instance = next((i for i in instances if i.get('instance', {}).get('instanceName') == conn.instance_name), None)
+                
+                if my_instance and my_instance.get('instance', {}).get('owner'):
+                    owner_jid = my_instance['instance']['owner'] # ex: 5511999999999@s.whatsapp.net
+                    target_phone = owner_jid.split('@')[0].split(':')[0]
+                    
+                    # Salva no banco para não precisar consultar de novo na próxima
+                    conn.session_data = {"me": {"id": owner_jid}}
+                    conn.status = "connected"
+                    db.session.commit()
+                    print(f"✅ [API] Número recuperado e salvo: {target_phone}")
+        except Exception as e:
+            print(f"❌ Erro ao consultar Evolution API: {e}")
+
+    # FALHA TOTAL: Se não conseguiu achar o número de jeito nenhum
+    if not target_phone:
+        return """
+        <div style="font-family:sans-serif; text-align:center; padding:50px;">
+            <h1>⚠️ WhatsApp Não Configurado</h1>
+            <p>A clínica ainda não conectou o WhatsApp ao sistema corretamente.</p>
+            <p>Por favor, entre em contato por outro meio.</p>
+        </div>
+        """, 503
+
+    # 3. Redireciona
     text_encoded = urllib.parse.quote(campaign.whatsapp_message_template)
-    return redirect(f"https://wa.me/{target_phone}?text={text_encoded}")
+    whatsapp_url = f"https://api.whatsapp.com/send?phone={target_phone}&text={text_encoded}"
+    
+    return redirect(whatsapp_url)
 
 # ==============================================================================
 # 3. QR CODE
