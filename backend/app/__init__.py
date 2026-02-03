@@ -163,6 +163,66 @@ def create_app():
             db.session.rollback()
             return jsonify({"error": str(e)}), 500
 
+    # --- ROTA DE REPARO DE EMERGÊNCIA (Cria tabelas SQL na força bruta) ---
+    @app.route("/api/fix_tables")
+    def fix_tables():
+        try:
+            from sqlalchemy import text
+            
+            # 1. Cria tabela AutomacaoRecall
+            sql_recall = text("""
+                CREATE TABLE IF NOT EXISTS automacoes_recall (
+                    id SERIAL PRIMARY KEY,
+                    clinic_id INTEGER NOT NULL,
+                    nome VARCHAR(100),
+                    dias_ausente INTEGER,
+                    horario_disparo VARCHAR(5),
+                    mensagem_template TEXT,
+                    ativo BOOLEAN DEFAULT TRUE
+                );
+            """)
+            
+            # 2. Cria tabela CRMStage
+            sql_stage = text("""
+                CREATE TABLE IF NOT EXISTS crm_stages (
+                    id SERIAL PRIMARY KEY,
+                    clinic_id INTEGER NOT NULL,
+                    nome VARCHAR(50),
+                    ordem INTEGER,
+                    cor VARCHAR(7),
+                    is_initial BOOLEAN DEFAULT FALSE,
+                    is_success BOOLEAN DEFAULT FALSE
+                );
+            """)
+
+            # 3. Cria tabela CRMCard
+            sql_card = text("""
+                CREATE TABLE IF NOT EXISTS crm_cards (
+                    id SERIAL PRIMARY KEY,
+                    clinic_id INTEGER NOT NULL,
+                    paciente_id INTEGER,
+                    stage_id INTEGER,
+                    ultima_interacao TIMESTAMP WITHOUT TIME ZONE,
+                    status VARCHAR(20) DEFAULT 'open'
+                );
+            """)
+
+            # 4. Adiciona a coluna receive_marketing se ela não existir
+            sql_coluna = text("""
+                ALTER TABLE patients ADD COLUMN IF NOT EXISTS receive_marketing BOOLEAN DEFAULT TRUE;
+            """)
+
+            db.session.execute(sql_recall)
+            db.session.execute(sql_stage)
+            db.session.execute(sql_card)
+            db.session.execute(sql_coluna)
+            db.session.commit()
+            
+            return jsonify({"message": "Tabelas recriadas via SQL com sucesso!"}), 200
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": str(e)}), 500
+
     # --- FRONTEND (SPA) ---
     @app.route("/")
     def index():
