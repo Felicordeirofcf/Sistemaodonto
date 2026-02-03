@@ -30,6 +30,11 @@ class Clinic(db.Model):
     whatsapp_messages = db.relationship("MessageLog", backref="clinic", lazy=True)
     scheduled_messages = db.relationship("ScheduledMessage", backref="clinic", lazy=True)
 
+    # Relacionamentos CRM e Automação (NOVO)
+    crm_stages = db.relationship("CRMStage", backref="clinic", lazy=True)
+    crm_cards = db.relationship("CRMCard", backref="clinic", lazy=True)
+    automations = db.relationship("AutomacaoRecall", backref="clinic", lazy=True)
+
 
 # =========================================================
 # 2) USUÁRIOS
@@ -84,6 +89,9 @@ class Patient(db.Model):
     # Paciente pode ter vários contatos whatsapp associados
     whatsapp_contacts = db.relationship("WhatsAppContact", backref="patient", lazy=True)
     
+    # Relacionamento com CRM
+    crm_cards = db.relationship("CRMCard", backref="patient", lazy=True)
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -105,13 +113,11 @@ class InventoryItem(db.Model):
 
     name = db.Column(db.String(100), nullable=False)
     
-    # Adicionado para evitar erro na rota de Estoque que criamos antes
     category = db.Column(db.String(50), default="Material") 
     
     quantity = db.Column(db.Float, default=0.0)
-    min_quantity = db.Column(db.Float, default=5.0) # Correção aplicada (era min_stock)
+    min_quantity = db.Column(db.Float, default=5.0) 
     
-    # Adicionado para evitar erro na rota de Estoque (cálculo de ROI)
     purchase_price = db.Column(db.Float, default=0.0) 
 
     unit = db.Column(db.String(20), default="unidade")
@@ -164,7 +170,7 @@ class Transaction(db.Model):
 
 
 # =========================================================
-# 7) WHATSAPP / MARKETING (NOVOS)
+# 7) WHATSAPP / MARKETING
 # =========================================================
 
 class WhatsAppConnection(db.Model):
@@ -241,3 +247,63 @@ class ScheduledMessage(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     contact = db.relationship("WhatsAppContact", backref=db.backref("scheduled", lazy=True))
+
+
+# =========================================================
+# 8) CRM & AUTOMAÇÃO (NOVOS)
+# =========================================================
+
+class AutomacaoRecall(db.Model):
+    __tablename__ = 'automacoes_recall'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
+    
+    nome = db.Column(db.String(100)) # Ex: "Recall 6 Meses"
+    dias_ausente = db.Column(db.Integer) # Ex: 180
+    horario_disparo = db.Column(db.String(5)) # Ex: "09:00"
+    
+    mensagem_template = db.Column(db.Text) # "Olá {nome}..."
+    ativo = db.Column(db.Boolean, default=True)
+
+
+class CRMStage(db.Model):
+    __tablename__ = 'crm_stages'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
+    
+    nome = db.Column(db.String(50)) # Ex: "A Contactar"
+    ordem = db.Column(db.Integer)   # 1, 2, 3
+    cor = db.Column(db.String(7))   # #FF0000
+    
+    is_initial = db.Column(db.Boolean, default=False)
+    is_success = db.Column(db.Boolean, default=False)
+
+
+class CRMCard(db.Model):
+    __tablename__ = 'crm_cards'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
+    
+    paciente_id = db.Column(db.Integer, db.ForeignKey('patients.id'))
+    stage_id = db.Column(db.Integer, db.ForeignKey('crm_stages.id'))
+    
+    ultima_interacao = db.Column(db.DateTime, default=datetime.utcnow)
+    status = db.Column(db.String(20), default='open') # open, won, lost
+    
+    # Relacionamentos
+    history = db.relationship("CRMHistory", backref="card", lazy=True)
+    stage = db.relationship("CRMStage", backref="cards", lazy=True)
+
+
+class CRMHistory(db.Model):
+    __tablename__ = 'crm_history'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    card_id = db.Column(db.Integer, db.ForeignKey('crm_cards.id'))
+    
+    tipo = db.Column(db.String(50)) # BOT_SENT, STAGE_CHANGE
+    descricao = db.Column(db.Text)
+    criado_em = db.Column(db.DateTime, default=datetime.utcnow)

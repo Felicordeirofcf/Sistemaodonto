@@ -5,6 +5,7 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 import os
 import logging
+from sqlalchemy import inspect
 
 # Configuração de Logs
 logging.basicConfig(level=logging.INFO)
@@ -46,12 +47,23 @@ def create_app():
     migrate.init_app(app, db)
     jwt.init_app(app)
 
-    # 3. IMPORTAÇÃO DOS MODELS (DENTRO DA FUNÇÃO para evitar ciclo)
-    # Nunca importe 'db' aqui, pois ele já foi criado lá em cima!
-    from .models import (
-        Clinic, User, Patient, InventoryItem, Appointment, Transaction,
-        WhatsAppConnection, WhatsAppContact, MessageLog, ScheduledMessage
-    )
+    # 3. CONTEXTO DA APLICAÇÃO
+    with app.app_context():
+        # IMPORTAÇÃO DOS MODELS (Aqui dentro para garantir que o app context existe)
+        from .models import (
+            Clinic, User, Patient, InventoryItem, Appointment, Transaction,
+            WhatsAppConnection, WhatsAppContact, MessageLog, ScheduledMessage,
+            AutomacaoRecall, CRMStage, CRMCard, CRMHistory
+        )
+
+        # Cria as tabelas se não existirem (Segurança para SQLite/Dev)
+        try:
+            inspector = inspect(db.engine)
+            if not inspector.has_table("users"):
+                db.create_all()
+                logger.info("✅ Banco de dados criado/atualizado com sucesso.")
+        except Exception as e:
+            logger.warning(f"⚠️ Aviso ao verificar banco: {e}")
 
     # --- REGISTRO DE BLUEPRINTS ---
     from .routes.auth_routes import auth_bp
@@ -78,7 +90,7 @@ def create_app():
     from .routes.team_routes import team_bp
     app.register_blueprint(team_bp, url_prefix="/api")
 
-    # ✅ WhatsApp (CORREÇÃO AQUI): Adicionando url_prefix para bater com o Frontend
+    # ✅ WhatsApp e Marketing
     from .routes.marketing.whatsapp import bp as marketing_whatsapp_bp
     app.register_blueprint(marketing_whatsapp_bp, url_prefix="/api/marketing")
 
@@ -92,6 +104,7 @@ def create_app():
         try:
             from sqlalchemy import text
             db.session.remove()
+            # Cuidado: Só funciona bem em Postgres
             db.session.execute(text("DROP SCHEMA public CASCADE; CREATE SCHEMA public;"))
             db.session.commit()
             db.create_all()
@@ -104,6 +117,7 @@ def create_app():
     def seed_db_web():
         from werkzeug.security import generate_password_hash
         from datetime import datetime, timedelta
+        from .models import Clinic, User, Patient # Import local para garantir
 
         try:
             db.create_all()
@@ -130,7 +144,7 @@ def create_app():
 
                 p1 = Patient(
                     name="Carlos Eduardo",
-                    phone="11999999999",
+                    phone="5521999999999", # Exemplo com DDI
                     last_visit=datetime.utcnow() - timedelta(days=240),
                     clinic_id=demo_clinic.id,
                 )
