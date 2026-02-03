@@ -9,17 +9,34 @@ bp = Blueprint("marketing_automations", __name__)
 # Helpers
 # ------------------------------------------------------------------------------
 
-def _get_clinic_id_from_jwt():
+def _get_clinic_id_from_jwt() -> int:
     identity = get_jwt_identity()
     if isinstance(identity, dict) and identity.get("clinic_id"):
-        return identity["clinic_id"]
+        try:
+            return int(identity["clinic_id"])
+        except Exception:
+            return 1
     return 1
 
-def _get_json_or_400():
+def _get_json_or_none():
     data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return None
-    return data
+    return data if isinstance(data, dict) else None
+
+def _is_valid_time_hhmm(value: str) -> bool:
+    try:
+        datetime.strptime(value, "%H:%M")
+        return True
+    except Exception:
+        return False
+
+def _clamp_int(value, default=180, min_v=1, max_v=3650):
+    try:
+        v = int(value)
+        if v < min_v: return min_v
+        if v > max_v: return max_v
+        return v
+    except Exception:
+        return default
 
 
 # ==============================================================================
@@ -31,7 +48,7 @@ def _get_json_or_400():
 def list_automations():
     clinic_id = _get_clinic_id_from_jwt()
 
-    regras = AutomacaoRecall.query.filter_by(clinic_id=clinic_id).all()
+    regras = AutomacaoRecall.query.filter_by(clinic_id=clinic_id).order_by(AutomacaoRecall.id.desc()).all()
 
     return jsonify([{
         "id": r.id,
@@ -47,21 +64,15 @@ def list_automations():
 @jwt_required()
 def create_automation():
     clinic_id = _get_clinic_id_from_jwt()
-    data = _get_json_or_400()
+    data = _get_json_or_none()
     if data is None:
         return jsonify({"message": "JSON inválido ou ausente"}), 400
 
-    # Validações mínimas para não estourar exceptions
-    try:
-        dias_ausente = int(data.get("dias_ausente", 180))
-    except Exception:
-        dias_ausente = 180
-
-    horario = (data.get("horario") or "09:00").strip()
     nome = (data.get("nome") or "Nova Regra").strip()
+    horario = (data.get("horario") or "09:00").strip()
     mensagem = (data.get("mensagem") or "Olá {nome}, faz tempo que não te vemos!").strip()
+    dias_ausente = _clamp_int(data.get("dias_ausente", 180), default=180, min_v=1, max_v=3650)
 
-    # (Opcional) valida formato HH:MM
     if not _is_valid_time_hhmm(horario):
         return jsonify({"message": "Horário inválido. Use HH:MM (ex: 09:00)."}), 400
 
@@ -77,10 +88,54 @@ def create_automation():
     db.session.add(nova_regra)
     db.session.commit()
 
+    return jsonify({"message": "Regra criada com sucesso!", "id": nova_regra.id}), 201
+
+
+@bp.route('/automations/<int:id>', methods=['PATCH'])
+@jwt_required()
+def update_automation(id):
+    """
+    Atualiza parcialmente uma regra:
+    - nome
+    - dias_ausente
+    - horario
+    - mensagem
+    - ativo
+    """
+    clinic_id = _get_clinic_id_from_jwt()
+    data = _get_json_or_none()
+    if data is None:
+        return jsonify({"message": "JSON inválido ou ausente"}), 400
+
+    regra = AutomacaoRecall.query.filter_by(id=id, clinic_id=clinic_id).first()
+    if not regra:
+        return jsonify({"message": "Regra não encontrada"}), 404
+
+    if "nome" in data:
+        regra.nome = (data.get("nome") or "Nova Regra").strip()
+
+    if "dias_ausente" in data:
+        regra.dias_ausente = _clamp_int(data.get("dias_ausente", regra.dias_ausente), default=regra.dias_ausente)
+
+    if "horario" in data:
+        horario = (data.get("horario") or "").strip()
+        if not _is_valid_time_hhmm(horario):
+            return jsonify({"message": "Horário inválido. Use HH:MM (ex: 09:00)."}), 400
+        regra.horario_disparo = horario
+
+    if "mensagem" in data:
+        regra.mensagem_template = (data.get("mensagem") or "").strip()
+
+    if "ativo" in data:
+        regra.ativo = bool(data.get("ativo"))
+
+    db.session.commit()
+
     return jsonify({
-        "message": "Regra criada com sucesso!",
-        "id": nova_regra.id
-    }), 201
+        "message": "Regra atualizada",
+        "id": regra.id,
+        "ativo": bool(regra.ativo)
+    }), 200
 
 
 @bp.route('/automations/<int:id>', methods=['DELETE'])
@@ -88,7 +143,6 @@ def create_automation():
 def delete_automation(id):
     clinic_id = _get_clinic_id_from_jwt()
 
-    # Segurança multi-tenant: não deixa deletar regra de outra clínica
     regra = AutomacaoRecall.query.filter_by(id=id, clinic_id=clinic_id).first()
     if not regra:
         return jsonify({"message": "Regra não encontrada"}), 404
@@ -96,15 +150,6 @@ def delete_automation(id):
     db.session.delete(regra)
     db.session.commit()
     return jsonify({"message": "Regra removida"}), 200
-
-
-def _is_valid_time_hhmm(value: str) -> bool:
-    # Aceita "09:00" / "9:00" (se quiser exigir 2 dígitos, ajusta)
-    try:
-        datetime.strptime(value, "%H:%M")
-        return True
-    except Exception:
-        return False
 
 
 # ==============================================================================
@@ -116,7 +161,7 @@ def _is_valid_time_hhmm(value: str) -> bool:
 def get_crm_board():
     clinic_id = _get_clinic_id_from_jwt()
 
-    # 1) Estágios do funil (cria default se não existir)
+    # 1) Estágios (cria default se não existir)
     estagios = CRMStage.query.filter_by(clinic_id=clinic_id).order_by(CRMStage.ordem).all()
 
     if not estagios:
@@ -138,20 +183,20 @@ def get_crm_board():
         db.session.commit()
         estagios = CRMStage.query.filter_by(clinic_id=clinic_id).order_by(CRMStage.ordem).all()
 
-    # 2) Busca todos cards da clínica de uma vez (evita N+1 e vazamento)
     stage_ids = [e.id for e in estagios]
 
+    # 2) Busca cards da clínica em lote
     cards = CRMCard.query.filter(
         CRMCard.clinic_id == clinic_id,
         CRMCard.stage_id.in_(stage_ids)
     ).all()
 
-    # 3) Carrega pacientes em lote
-    paciente_ids = {c.paciente_id for c in cards if c.paciente_id}
+    # 3) Pacientes em lote
+    paciente_ids = {c.paciente_id for c in cards if getattr(c, "paciente_id", None)}
     pacientes = Patient.query.filter(Patient.id.in_(paciente_ids)).all() if paciente_ids else []
     pacientes_map = {p.id: p for p in pacientes}
 
-    # 4) Indexa cards por estágio
+    # 4) Indexa por stage
     cards_by_stage = {sid: [] for sid in stage_ids}
     for card in cards:
         cards_by_stage.setdefault(card.stage_id, []).append(card)
@@ -161,15 +206,15 @@ def get_crm_board():
     for estagio in estagios:
         cards_data = []
         for card in cards_by_stage.get(estagio.id, []):
-            paciente = pacientes_map.get(card.paciente_id)
+            paciente = pacientes_map.get(getattr(card, "paciente_id", None))
 
-            ultima = card.ultima_interacao
+            ultima = getattr(card, "ultima_interacao", None)
             ultima_fmt = ultima.strftime("%d/%m %H:%M") if ultima else ""
 
             cards_data.append({
                 "id": card.id,
-                "paciente_nome": paciente.name if paciente else (card.paciente_nome or "Desconhecido"),
-                "paciente_phone": paciente.phone if paciente else (card.paciente_phone or ""),
+                "paciente_nome": (paciente.name if paciente else (getattr(card, "paciente_nome", None) or "Desconhecido")),
+                "paciente_phone": (paciente.phone if paciente else (getattr(card, "paciente_phone", None) or "")),
                 "ultima_interacao": ultima_fmt,
                 "status": card.status
             })

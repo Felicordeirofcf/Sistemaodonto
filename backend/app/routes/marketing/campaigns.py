@@ -11,28 +11,31 @@ import os
 logger = logging.getLogger(__name__)
 bp = Blueprint('marketing_campaigns', __name__)
 
-# Configs (mantive, mas aqui você não está usando requests/WhatsAppConnection)
-EVOLUTION_API_URL = os.getenv("WHATSAPP_QR_SERVICE_URL", "http://localhost:8080").rstrip("/")
-EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "")
-
+DEFAULT_CLINIC_WHATSAPP = os.getenv("DEFAULT_CLINIC_WHATSAPP", "")
 
 # ------------------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------------------
 
-def _get_clinic_id_from_jwt():
+def _get_clinic_id_from_jwt() -> int:
     identity = get_jwt_identity()
     if isinstance(identity, dict) and identity.get("clinic_id"):
-        return identity["clinic_id"]
+        try:
+            return int(identity["clinic_id"])
+        except Exception:
+            return 1
     return 1
 
-def _safe_int(value, default=0):
+def _safe_int(value, default=0) -> int:
     try:
         return int(value)
     except Exception:
         return default
 
-def _generate_unique_code(length=5, max_tries=20):
+def _only_digits(value: str) -> str:
+    return "".join(filter(str.isdigit, value or ""))
+
+def _generate_unique_code(length=5, max_tries=30) -> str:
     """
     Gera tracking_code curto e evita colisão.
     """
@@ -42,21 +45,17 @@ def _generate_unique_code(length=5, max_tries=20):
         exists = Campaign.query.filter_by(tracking_code=code).first()
         if not exists:
             return code
-    # fallback (se der azar absurdo)
     return su.random(length=8)
 
 def _ensure_ref_in_message(msg_template: str, code: str) -> str:
     msg_template = (msg_template or "Olá, gostaria de saber mais.").strip()
 
-    # (Opcional) instrução para aumentar conversão (usuário precisa enviar msg)
-    # Você pode remover se não quiser.
+    # Ajuda na conversão (sem mensagem enviada, você não recebe webhook)
     if "enviar" not in msg_template.lower():
         msg_template = "Olá! Clique em enviar para iniciar o atendimento. " + msg_template
 
-    # garante ref
     ref_tag = f"[ref:{code}]"
     if ref_tag not in msg_template:
-        # coloca separado para facilitar parsing
         msg_template = msg_template + f" {ref_tag}"
 
     return msg_template
@@ -76,34 +75,43 @@ def create_campaign():
     if not name:
         return jsonify({"error": "Campo 'name' é obrigatório"}), 400
 
-    code = _generate_unique_code(length=5)
+    slug = (data.get("slug") or "").strip() or None
 
-    msg_template = _ensure_ref_in_message(data.get('message'), code)
+    landing_data = data.get("landing_data", {}) or {}
+    if not isinstance(landing_data, dict):
+        return jsonify({"error": "Campo 'landing_data' deve ser um objeto JSON"}), 400
+
+    code = _generate_unique_code(length=5)
+    msg_template = _ensure_ref_in_message(data.get("message"), code)
 
     new_campaign = Campaign(
         clinic_id=clinic_id,
         name=name,
-        slug=data.get('slug'),
+        slug=slug,
         tracking_code=code,
         whatsapp_message_template=msg_template,
-        landing_page_data=data.get('landing_data', {}) or {},
+        landing_page_data=landing_data,
         active=True,
-        clicks_count=0 if getattr(Campaign, "clicks_count", None) else None,  # não quebra se model não tiver default
-        leads_count=0 if getattr(Campaign, "leads_count", None) else None
     )
+
+    # Se o model não tiver default 0, setamos aqui com segurança.
+    if hasattr(new_campaign, "clicks_count") and getattr(new_campaign, "clicks_count", None) is None:
+        new_campaign.clicks_count = 0
+    if hasattr(new_campaign, "leads_count") and getattr(new_campaign, "leads_count", None) is None:
+        new_campaign.leads_count = 0
 
     db.session.add(new_campaign)
     db.session.commit()
 
     base_url = request.host_url.rstrip('/')
-    full_tracking_url = f"{base_url}/api/marketing/c/{code}"
+    tracking_url = f"{base_url}/api/marketing/c/{code}"
 
     return jsonify({
         "id": new_campaign.id,
         "name": new_campaign.name,
         "tracking_code": code,
-        "tracking_url": full_tracking_url,
-        "active": True,
+        "tracking_url": tracking_url,
+        "active": bool(new_campaign.active),
         "clicks": _safe_int(getattr(new_campaign, "clicks_count", 0), 0),
         "leads": _safe_int(getattr(new_campaign, "leads_count", 0), 0),
         "qr_code_url": f"{base_url}/api/marketing/campaigns/{new_campaign.id}/qr"
@@ -151,10 +159,7 @@ def delete_campaign(id):
     camp = Campaign.query.filter_by(id=id, clinic_id=clinic_id).first_or_404()
 
     try:
-        # Remove eventos
         LeadEvent.query.filter_by(campaign_id=camp.id).delete(synchronize_session=False)
-
-        # Desvincula leads
         Lead.query.filter_by(campaign_id=camp.id).update(
             {Lead.campaign_id: None},
             synchronize_session=False
@@ -163,6 +168,7 @@ def delete_campaign(id):
         db.session.delete(camp)
         db.session.commit()
         return jsonify({"message": "Campanha excluída"}), 200
+
     except Exception as e:
         db.session.rollback()
         logger.exception(f"Erro ao excluir campanha {id}: {e}")
@@ -183,17 +189,18 @@ def track_click_and_redirect(code):
         if not campaign.active:
             return redirect("https://www.google.com/search?q=Campanha+Pausada")
 
-        # 1) Registra clique (sem quebrar em None)
+        # 1) registra clique sem quebrar em None
         try:
             current = _safe_int(getattr(campaign, "clicks_count", 0), 0)
-            campaign.clicks_count = current + 1
+            if hasattr(campaign, "clicks_count"):
+                campaign.clicks_count = current + 1
 
             db.session.add(LeadEvent(
                 campaign_id=campaign.id,
                 event_type='click',
                 metadata_json={
-                    'user_agent': request.headers.get('User-Agent', ''),
-                    'ip': request.headers.get('X-Forwarded-For', request.remote_addr),
+                    "user_agent": request.headers.get("User-Agent", ""),
+                    "ip": request.headers.get("X-Forwarded-For", request.remote_addr),
                 }
             ))
             db.session.commit()
@@ -201,25 +208,24 @@ def track_click_and_redirect(code):
             db.session.rollback()
             logger.warning(f"⚠️ Erro ao salvar métrica de clique: {e}")
 
-        # 2) Número âncora: WhatsApp da clínica
+        # 2) número âncora: whatsapp da clínica
         clinic = Clinic.query.get(campaign.clinic_id)
-        target_phone = clinic.whatsapp_number if clinic else None
+        target_phone = _only_digits(getattr(clinic, "whatsapp_number", "") if clinic else "")
 
         if not target_phone:
-            # Evite hardcode em produção; melhor ter um env var DEFAULT_CLINIC_WHATSAPP
-            target_phone = os.getenv("DEFAULT_CLINIC_WHATSAPP", "5521987708652")
+            target_phone = _only_digits(DEFAULT_CLINIC_WHATSAPP)
 
-        target_phone = "".join(filter(str.isdigit, target_phone))
+        if not target_phone:
+            return redirect("https://www.google.com/search?q=Erro+WhatsApp+Nao+Configurado")
 
-        # 3) Garante que a mensagem contenha o ref (por segurança)
+        # 3) garante que a mensagem contenha o ref
         msg_template = _ensure_ref_in_message(campaign.whatsapp_message_template or "", campaign.tracking_code)
 
-        # 4) Redireciona para WhatsApp
-        # api.whatsapp.com funciona bem em desktop/mobile.
+        # 4) redirect pro whatsapp
         text_encoded = urllib.parse.quote(msg_template, safe="")
         whatsapp_url = f"https://api.whatsapp.com/send?phone={target_phone}&text={text_encoded}"
 
-        logger.info(f"🚀 Redirect campanha={campaign.id} clinic={campaign.clinic_id} -> wa phone={target_phone}")
+        logger.info(f"🚀 Redirect campanha={campaign.id} clinic={campaign.clinic_id} -> wa={target_phone}")
         return redirect(whatsapp_url)
 
     except Exception as e:
@@ -246,7 +252,9 @@ def get_qr_code(campaign_id):
         img_io = BytesIO()
         img.save(img_io, 'PNG')
         img_io.seek(0)
-        return send_file(img_io, mimetype='image/png')
+
+        # Opcional: cache leve no client/CDN
+        return send_file(img_io, mimetype='image/png', max_age=60)
 
     except Exception as e:
         logger.exception(f"Erro ao gerar QR: {e}")

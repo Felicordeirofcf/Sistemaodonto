@@ -3,6 +3,7 @@ from app.models import db, Clinic, CRMStage, CRMCard, Lead, Campaign, LeadEvent
 import logging
 import json
 import re
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('marketing_webhook', __name__)
@@ -71,30 +72,48 @@ def _extract_message_text(payload: dict) -> str:
 
     return ""
 
-def _extract_instance_owner(data: dict) -> str:
-    if not isinstance(data, dict):
+def _extract_instance_owner(container: dict) -> str:
+    """
+    container pode ser o 'data' original ou o 'payload'.
+    Aceita:
+      - container["instance"] dict {"owner": "..."}
+      - container["instance"] str "clinica_v3_1"
+      - container["instanceOwner"] / container["owner"]
+    """
+    if not isinstance(container, dict):
         return ""
 
-    inst_raw = data.get("instance", {})
+    inst_raw = container.get("instance", {})
     inst = _as_dict(inst_raw)
 
     owner = (
         (inst.get("owner") if isinstance(inst, dict) else "")
-        or data.get("instanceOwner")
-        or data.get("owner")
+        or container.get("instanceOwner")
+        or container.get("owner")
         or ""
     )
     return owner.strip() if isinstance(owner, str) else ""
 
+def _extract_instance_name(container: dict) -> str:
+    """
+    Tenta capturar o nome da instância (ex: clinica_v3_10)
+    em caso de multi-tenant por instância.
+    """
+    if not isinstance(container, dict):
+        return ""
+    inst = container.get("instance")
+    if isinstance(inst, str) and inst.strip():
+        return inst.strip()
+    if isinstance(inst, dict):
+        for k in ("instanceName", "name"):
+            if isinstance(inst.get(k), str) and inst.get(k).strip():
+                return inst.get(k).strip()
+    # alguns provedores mandam "instanceName" direto
+    if isinstance(container.get("instanceName"), str):
+        return container.get("instanceName").strip()
+    return ""
+
 def _extract_tracking_code(message_text: str) -> str:
-    """
-    Aceita variações:
-      [ref:CODE]
-      ref:CODE
-      ref=CODE
-      ?ref=CODE
-      utm_campaign=CODE
-    """
     if not message_text:
         return ""
 
@@ -109,7 +128,6 @@ def _extract_tracking_code(message_text: str) -> str:
         m = re.search(p, message_text, flags=re.IGNORECASE)
         if m:
             return (m.group("code") or "").strip()
-
     return ""
 
 def garantir_etapas_crm(clinic_id):
@@ -137,6 +155,26 @@ def garantir_etapas_crm(clinic_id):
         ))
     db.session.commit()
 
+def _append_history(card: CRMCard, text: str):
+    """
+    Adiciona histórico sem quebrar.
+    """
+    if not hasattr(card, "historico_conversas"):
+        return
+    prev = getattr(card, "historico_conversas", "") or ""
+    if prev:
+        new = prev + "\n" + text
+    else:
+        new = text
+    setattr(card, "historico_conversas", new)
+
+def _touch_last_interaction(card: CRMCard):
+    """
+    Atualiza ultima_interacao se existir no model.
+    """
+    if hasattr(card, "ultima_interacao"):
+        setattr(card, "ultima_interacao", datetime.utcnow())
+
 
 # -------------------------
 # Routes
@@ -150,7 +188,7 @@ def whatsapp_webhook():
     if not data or not isinstance(data, dict):
         return jsonify({"status": "ignored", "reason": "no json"}), 200
 
-    # Alguns provedores mandam direto o payload, outros dentro de "data"
+    # Alguns provedores mandam dentro de "data"
     payload = data.get("data") if isinstance(data.get("data"), dict) else data
     if not isinstance(payload, dict):
         return jsonify({"status": "ignored", "reason": "invalid payload"}), 200
@@ -163,37 +201,51 @@ def whatsapp_webhook():
         return jsonify({"status": "ignored", "reason": "from_me"}), 200
 
     remote_jid = key.get('remoteJid') or ""
+    if isinstance(remote_jid, str) and remote_jid.endswith("@g.us"):
+        return jsonify({"status": "ignored", "reason": "group_message"}), 200
+
     phone = _normalize_phone_from_jid(remote_jid)
     if not phone:
         return jsonify({"status": "ignored", "reason": "no phone"}), 200
 
     push_name = payload.get('pushName') or 'Paciente'
     message_text = _extract_message_text(payload)
+    message_text = (message_text or "").strip()
 
-    # IMPORTANTE: se não tem mensagem, não tem lead (evento não representa clique)
-    if not (message_text or "").strip():
+    if not message_text:
         return jsonify({"status": "ignored", "reason": "no text"}), 200
 
-    # Identificação da clínica por owner (robusto)
-    instance_owner = _extract_instance_owner(data)
-    owner_phone = _normalize_phone_from_jid(instance_owner)
+    # --- Identificação da clínica ---
+    # tenta extrair owner/instance do data original E do payload
+    owner_raw = _extract_instance_owner(data) or _extract_instance_owner(payload)
+    owner_phone = _normalize_phone_from_jid(owner_raw)
+
+    instance_name = _extract_instance_name(data) or _extract_instance_name(payload)
 
     clinic_id = 1
+    clinic = None
+
+    # 1) Preferência: mapear pelo número owner salvo
     if owner_phone:
         clinic = Clinic.query.filter_by(whatsapp_number=owner_phone).first()
-        if clinic:
-            clinic_id = clinic.id
+
+    # 2) Fallback: mapear pela instance se você tiver esse campo no Clinic
+    if not clinic and instance_name:
+        if hasattr(Clinic, "whatsapp_instance"):
+            clinic = Clinic.query.filter_by(whatsapp_instance=instance_name).first()
+
+    if clinic:
+        clinic_id = clinic.id
 
     garantir_etapas_crm(clinic_id)
 
-    # Detecta campanha por ref no texto
+    # --- Campanha ---
     code = _extract_tracking_code(message_text)
     campaign = None
     if code:
-        # se seu banco for case-sensitive, isso ajuda:
         campaign = Campaign.query.filter(Campaign.tracking_code.ilike(code)).first()
 
-    # Se já existe card aberto, só registra evento e sai
+    # --- Procura card aberto ---
     existing_card = CRMCard.query.filter(
         CRMCard.clinic_id == clinic_id,
         CRMCard.paciente_phone == phone,
@@ -201,38 +253,55 @@ def whatsapp_webhook():
     ).first()
 
     try:
+        # Sempre registra evento de msg_in
+        db.session.add(LeadEvent(
+            campaign_id=campaign.id if campaign else None,
+            event_type='msg_in',
+            metadata_json={
+                'phone': phone,
+                'push_name': push_name,
+                'message': message_text,
+                'clinic_id': clinic_id,
+                'owner_phone': owner_phone,
+                'instance_name': instance_name,
+                'tracking_code': code or None,
+                'note': 'existing_card' if existing_card else 'new_contact'
+            }
+        ))
+
         if existing_card:
-            db.session.add(LeadEvent(
-                campaign_id=campaign.id if campaign else None,
-                event_type='msg_in',
-                metadata_json={
-                    'phone': phone,
-                    'push_name': push_name,
-                    'message': message_text,
-                    'clinic_id': clinic_id,
-                    'owner_phone': owner_phone,
-                    'note': 'already_in_crm'
-                }
-            ))
+            # Atualiza histórico/ultima interação do card existente
+            _append_history(existing_card, f"{push_name}: {message_text}")
+            _touch_last_interaction(existing_card)
+
             db.session.commit()
             return jsonify({"status": "processed", "reason": "existing_card"}), 200
 
-        # Cria Lead/Card mesmo sem campanha (não perde lead!)
+        # --- Evita duplicar Lead (se já existe lead com mesmo phone aberto pra clínica) ---
+        existing_lead = Lead.query.filter_by(clinic_id=clinic_id, phone=phone).first()
+
+        # Estágio inicial
         stage = CRMStage.query.filter_by(clinic_id=clinic_id, is_initial=True).first()
         if not stage:
+            db.session.commit()
             return jsonify({"status": "ignored", "reason": "no initial stage"}), 200
 
         source_text = f"Campanha: {campaign.name}" if campaign else "WhatsApp (orgânico)"
 
-        novo_lead = Lead(
-            clinic_id=clinic_id,
-            campaign_id=campaign.id if campaign else None,
-            name=push_name,
-            phone=phone,
-            source=source_text,
-            status='novo'
-        )
-        db.session.add(novo_lead)
+        if not existing_lead:
+            novo_lead = Lead(
+                clinic_id=clinic_id,
+                campaign_id=campaign.id if campaign else None,
+                name=push_name,
+                phone=phone,
+                source=source_text,
+                status='novo'
+            )
+            db.session.add(novo_lead)
+        else:
+            # se já existe lead, atualiza o campaign_id se vier campanha agora
+            if campaign and getattr(existing_lead, "campaign_id", None) is None:
+                existing_lead.campaign_id = campaign.id
 
         novo_card = CRMCard(
             clinic_id=clinic_id,
@@ -243,27 +312,18 @@ def whatsapp_webhook():
             valor_proposta=0,
             status='open'
         )
+        _touch_last_interaction(novo_card)
         db.session.add(novo_card)
 
         if campaign:
+            # evita None
             campaign.leads_count = (campaign.leads_count or 0) + 1
 
-        db.session.add(LeadEvent(
-            campaign_id=campaign.id if campaign else None,
-            event_type='msg_in',
-            metadata_json={
-                'phone': phone,
-                'push_name': push_name,
-                'message': message_text,
-                'clinic_id': clinic_id,
-                'owner_phone': owner_phone,
-                'tracking_code': code or None
-            }
-        ))
-
         db.session.commit()
+
         return jsonify({
             "status": "processed",
+            "clinic_id": clinic_id,
             "campaign": campaign.id if campaign else None,
             "tracking_code": code or None
         }), 200
