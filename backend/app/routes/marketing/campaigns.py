@@ -122,7 +122,7 @@ def delete_campaign(id):
 
 
 # ==============================================================================
-# 2. ROTA DE RASTREAMENTO (ABRE WHATSAPP - BLINDADA)
+# 2. ROTA DE RASTREAMENTO (LÓGICA DE NÚMERO FIXO)
 # ==============================================================================
 
 @bp.route('/c/<code>', methods=['GET'])
@@ -150,21 +150,27 @@ def track_click_and_redirect(code):
             db.session.rollback()
             logger.warning(f"⚠️ Erro ao salvar métrica: {e}")
 
-        # 2. DEFINIÇÃO DIRETA DO TELEFONE (Evita erros de sincronização da API)
-        # Substitua abaixo pelo número real da sua clínica com 55 + DDD
-        target_phone = "5521987708652" 
+        # 2. LÓGICA DEFINITIVA: Pega o número direto do cadastro da clínica
+        # Isso evita que o sistema precise consultar a API Evolution no momento do clique
+        target_phone = campaign.clinic.whatsapp_number
         
-        logger.info(f"✅ Redirecionando Lead para: {target_phone}")
+        # Caso a clínica ainda não tenha o número cadastrado, usa o seu número padrão como segurança
+        if not target_phone:
+            target_phone = "5521987708652" 
+        
+        # Limpa o número para garantir que tenha apenas dígitos
+        target_phone = "".join(filter(str.isdigit, target_phone))
 
         # 3. Redireciona para o WhatsApp
         text_encoded = urllib.parse.quote(campaign.whatsapp_message_template or "")
         whatsapp_url = f"https://api.whatsapp.com/send?phone={target_phone}&text={text_encoded}"
 
+        logger.info(f"🚀 Redirecionando Lead para o WhatsApp da Clínica: {target_phone}")
         return redirect(whatsapp_url)
 
     except Exception as e:
-        logger.error(f"🔥 ERRO CRÍTICO: {e}")
-        return redirect(f"https://www.google.com/search?q=Erro+Sistema+{urllib.parse.quote(str(e))}")
+        logger.error(f"🔥 ERRO CRÍTICO NO REDIRECT: {e}")
+        return redirect(f"https://www.google.com/search?q=Erro+Sistema+Odonto+{urllib.parse.quote(str(e))}")
 
 
 # ==============================================================================

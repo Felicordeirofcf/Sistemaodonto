@@ -11,6 +11,9 @@ class Clinic(db.Model):
     name = db.Column(db.String(100), nullable=False)
     cnpj_cpf = db.Column(db.String(20), unique=True)
 
+    # ✅ CAMPO ESSENCIAL: Número oficial para redirecionamento (Ex: 5521987708652)
+    whatsapp_number = db.Column(db.String(20), nullable=True) 
+
     plan_type = db.Column(db.String(20), default="Bronze")
     max_dentists = db.Column(db.Integer, default=1)
     is_active = db.Column(db.Boolean, default=True)
@@ -173,7 +176,7 @@ class WhatsAppConnection(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=False, index=True)
     
-    # Nome da instância na Evolution (ex: clinica_v3_1)
+    # ✅ CAMPO ADICIONADO: Nome da instância (Ex: clinica_v3_1)
     instance_name = db.Column(db.String(50), unique=True, index=True) 
     
     provider = db.Column(db.String(20), nullable=False, default="qr")
@@ -258,7 +261,7 @@ class CRMCard(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
     
-    # Suporte a Leads que ainda não são pacientes cadastrados
+    # ✅ CAMPOS ESSENCIAIS PARA LEADS DO WHATSAPP
     paciente_id = db.Column(db.Integer, db.ForeignKey('patients.id'), nullable=True)
     paciente_nome = db.Column(db.String(100)) 
     paciente_phone = db.Column(db.String(30)) 
