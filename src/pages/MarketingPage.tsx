@@ -10,12 +10,27 @@ interface AutomationRule {
   ativo: boolean;
 }
 
+interface CRMCard {
+  id: number;
+  paciente_nome: string;
+  paciente_phone: string;
+  ultima_interacao: string;
+  status: string;
+}
+
+interface CRMStage {
+  id: number;
+  nome: string;
+  cor: string;
+  cards: CRMCard[];
+}
+
 const MarketingPage: React.FC = () => {
   const [rules, setRules] = useState<AutomationRule[]>([]);
+  const [crmBoard, setCrmBoard] = useState<CRMStage[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   
-  // Estado do Formulário
   const [formData, setFormData] = useState({
     nome: '',
     dias_ausente: 180,
@@ -23,273 +38,127 @@ const MarketingPage: React.FC = () => {
     mensagem: 'Olá {nome}, faz tempo que não te vemos! Vamos cuidar desse sorriso? 🦷'
   });
 
-  // URL Relativa (Funciona no Localhost e no Render)
   const API_URL = '/api/marketing'; 
-  
-  // Pega o token salvo no login
   const token = localStorage.getItem('odonto_token'); 
 
-  // --- BUSCAR REGRAS (GET) ---
-  // Envolvido em useCallback para evitar loops ou avisos do useEffect
-  const fetchRules = useCallback(async () => {
+  // Função unificada para buscar tudo
+  const fetchData = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/automations`, {
-        method: 'GET',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+      // 1. Regras
+      const resRules = await fetch(`${API_URL}/automations`, {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
-      
-      if (!res.ok) throw new Error('Erro ao buscar regras');
-      
-      const data = await res.json();
-      setRules(data);
+      if (resRules.ok) setRules(await resRules.json());
+
+      // 2. CRM (Kanban)
+      const resCRM = await fetch(`${API_URL}/crm/board`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (resCRM.ok) setCrmBoard(await resCRM.json());
+
     } catch (error) {
-      console.error("Erro ao buscar regras:", error);
+      console.error("Erro ao atualizar dados:", error);
     } finally {
       setLoading(false);
     }
   }, [API_URL, token]);
 
-  // Carrega as regras ao abrir a página
   useEffect(() => {
-    fetchRules();
-  }, [fetchRules]);
+    fetchData();
+    const interval = setInterval(fetchData, 30000); // Atualiza a cada 30s
+    return () => clearInterval(interval);
+  }, [fetchData]);
 
-  // --- SALVAR NOVA REGRA (POST) ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch(`${API_URL}/automations`, {
+      await fetch(`${API_URL}/automations`, {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
       });
-
-      if (!res.ok) throw new Error('Erro ao salvar');
-
-      setIsModalOpen(false); // Fecha o modal
-      fetchRules(); // Atualiza a lista na tela
-      
-      // Limpa o formulário
-      setFormData({
-        nome: '',
-        dias_ausente: 180,
-        horario: '09:00',
-        mensagem: 'Olá {nome}, faz tempo que não te vemos! Vamos cuidar desse sorriso? 🦷'
-      });
-
-    } catch (error) {
-      window.alert('Erro ao salvar regra. Verifique se está logado.');
-    }
+      setIsModalOpen(false);
+      fetchData();
+    } catch (error) { window.alert('Erro ao salvar'); }
   };
 
-  // --- DELETAR REGRA (DELETE) ---
   const handleDelete = async (id: number) => {
-    if (!window.confirm('Tem certeza que deseja apagar este robô?')) return;
-    try {
-      const res = await fetch(`${API_URL}/automations/${id}`, {
-        method: 'DELETE',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+    if (!window.confirm('Apagar regra?')) return;
+    await fetch(`${API_URL}/automations/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    fetchData();
+  };
 
-      if (!res.ok) throw new Error('Erro ao deletar');
-      
-      fetchRules(); // Atualiza a lista
-    } catch (error) {
-      window.alert('Erro ao deletar regra.');
-    }
+  const getColorClass = (cor: string) => {
+    const map: any = { yellow: 'border-yellow-400 bg-yellow-50', blue: 'border-blue-400 bg-blue-50', green: 'border-green-400 bg-green-50', red: 'border-red-400 bg-red-50' };
+    return map[cor] || 'border-gray-200';
   };
 
   return (
     <div className="p-8 bg-gray-50 min-h-screen text-gray-800">
-      
-      {/* CABEÇALHO */}
       <div className="flex justify-between items-center mb-8">
-        <div>
-            <h1 className="text-3xl font-bold text-slate-800">🤖 Automação de Recall</h1>
-            <p className="text-gray-500">Configure robôs para trazer seus pacientes de volta automaticamente.</p>
-        </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg shadow flex items-center gap-2 transition"
-        >
-          <span className="text-xl font-bold">+</span> Nova Regra
-        </button>
+        <h1 className="text-3xl font-bold text-slate-800">🤖 Automação de Recall</h1>
+        <button onClick={() => setIsModalOpen(true)} className="bg-blue-600 text-white px-5 py-2 rounded-lg font-bold">+ Nova Regra</button>
       </div>
 
-      {/* CARD STATUS DO ROBÔ */}
-      <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl p-6 text-white shadow-lg mb-8 flex justify-between items-center">
-        <div>
-          <h2 className="text-xl font-bold">O Robô está Ativo</h2>
-          <p className="opacity-90 mt-1">O sistema verifica pacientes sumidos a cada 1 hora e envia mensagens automaticamente.</p>
-        </div>
-        <div className="text-5xl opacity-30">⚙️</div>
+      {/* Regras */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        {rules.map(rule => (
+          <div key={rule.id} className="bg-white p-4 rounded-lg shadow border relative">
+             <button onClick={() => handleDelete(rule.id)} className="absolute top-2 right-2 text-red-300 hover:text-red-500">🗑️</button>
+             <h3 className="font-bold text-blue-600">{rule.nome}</h3>
+             <p className="text-sm">🕒 {rule.horario} | 📅 {rule.dias_ausente} dias</p>
+             <div className="mt-2 text-xs bg-green-50 p-2 rounded text-green-800 italic">"{rule.mensagem}"</div>
+          </div>
+        ))}
       </div>
 
-      {/* LISTA DE REGRAS */}
-      <div className="bg-white rounded-xl shadow p-6 mb-8">
-        <h3 className="text-lg font-bold mb-4 border-b pb-2 text-gray-700">Regras Configuradas</h3>
-        
-        {loading ? (
-          <div className="text-center py-4 text-gray-500">Carregando regras...</div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {rules.length === 0 && (
-                <div className="col-span-3 text-center py-8 text-gray-400 border-2 border-dashed rounded-lg">
-                    <p>Nenhuma regra ativa.</p>
-                    <p className="text-sm">Clique em "Nova Regra" para começar.</p>
+      {/* Kanban CRM Real */}
+      <h3 className="text-2xl font-bold mb-4">Funil de Recuperação (CRM)</h3>
+      <div className="flex gap-4 overflow-x-auto pb-4">
+        {crmBoard.map(stage => (
+          <div key={stage.id} className="min-w-[300px] bg-gray-100 p-4 rounded-xl">
+            <div className="font-bold text-gray-600 mb-4 flex justify-between uppercase text-sm border-b pb-2">
+              {stage.nome} <span className="bg-gray-300 px-2 rounded-full text-xs">{stage.cards.length}</span>
+            </div>
+            <div className="space-y-3">
+              {stage.cards.length === 0 && <div className="text-center text-gray-400 text-xs italic">Vazio</div>}
+              {stage.cards.map(card => (
+                <div key={card.id} className={`bg-white p-4 rounded-lg shadow-sm border-l-4 ${getColorClass(stage.cor)}`}>
+                  <div className="font-bold">{card.paciente_nome}</div>
+                  <div className="text-xs text-gray-500 flex justify-between mt-1">
+                    <span>{card.paciente_phone}</span>
+                    <span>{card.ultima_interacao}</span>
+                  </div>
                 </div>
-            )}
-            
-            {rules.map((rule) => (
-              <div key={rule.id} className="border border-gray-200 rounded-lg p-5 hover:shadow-md transition bg-white relative group">
-                <button 
-                  onClick={() => handleDelete(rule.id)}
-                  className="absolute top-4 right-4 text-gray-300 hover:text-red-500 transition"
-                  title="Excluir Regra"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                </button>
-                
-                <h4 className="font-bold text-lg text-blue-600 mb-2">{rule.nome}</h4>
-                
-                <div className="text-sm text-gray-600 space-y-1 mb-4">
-                  <p className="flex items-center gap-2">
-                    🕒 Dispara às <strong>{rule.horario}</strong>
-                  </p>
-                  <p className="flex items-center gap-2">
-                    📅 Ausência de <strong>{rule.dias_ausente} dias</strong>
-                  </p>
-                </div>
-                
-                <div className="bg-green-50 p-3 rounded text-xs text-green-800 border border-green-100 italic relative">
-                  <span className="absolute -top-2 left-2 bg-white px-1 text-[10px] text-green-600 font-bold border rounded">WhatsApp</span>
-                  "{rule.mensagem}"
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        )}
+        ))}
       </div>
 
-      {/* PRÉVIA DO KANBAN (Visual) */}
-      <h3 className="text-2xl font-bold text-slate-800 mb-4">Funil de Recuperação (CRM)</h3>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
-        {/* COLUNA 1: A CONTACTAR */}
-        <div className="bg-gray-100 p-4 rounded-xl min-h-[200px]">
-          <div className="font-bold text-gray-500 mb-4 flex justify-between items-center">
-            <span>A CONTACTAR</span>
-            <span className="bg-gray-300 text-gray-600 px-2 py-0.5 rounded-full text-xs font-bold">Auto</span>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm mb-3 border-l-4 border-yellow-400 cursor-pointer hover:shadow-md transition">
-            <div className="font-bold text-gray-800">Maria Silva</div>
-            <div className="text-xs text-gray-500 mt-1">Robô enviou msg hoje às 09:00</div>
-          </div>
-        </div>
-
-         {/* COLUNA 2: RESPONDIDOS */}
-         <div className="bg-gray-100 p-4 rounded-xl min-h-[200px]">
-          <div className="font-bold text-blue-600 mb-4">RESPONDIDOS</div>
-          <div className="bg-white p-4 rounded-lg shadow-sm mb-3 border-l-4 border-blue-500 cursor-pointer hover:shadow-md transition">
-            <div className="font-bold text-gray-800">João Souza</div>
-            <div className="text-xs text-gray-500 mt-1">💬 "Vou ver minha agenda..."</div>
-          </div>
-        </div>
-
-         {/* COLUNA 3: RECUPERADOS */}
-         <div className="bg-gray-100 p-4 rounded-xl min-h-[200px]">
-          <div className="font-bold text-green-600 mb-4">RECUPERADOS</div>
-          <div className="bg-white p-4 rounded-lg shadow-sm mb-3 border-l-4 border-green-500 cursor-pointer hover:shadow-md transition opacity-75">
-            <div className="font-bold text-gray-800">Ana Clara</div>
-            <div className="text-xs text-gray-500 mt-1">✅ Agendou para 15/02</div>
-          </div>
-        </div>
-
-      </div>
-
-      {/* MODAL DE CRIAÇÃO */}
+      {/* Modal - Simplificado para economizar espaço */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 transform transition-all scale-100">
-            <h2 className="text-2xl font-bold mb-6 text-gray-800">Criar Nova Automação</h2>
-            
-            <form onSubmit={handleSubmit}>
-              <div className="mb-4">
-                <label className="block text-sm font-bold mb-2 text-gray-700">Nome da Regra</label>
-                <input 
-                  type="text" 
-                  className="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition" 
-                  value={formData.nome}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({...formData, nome: e.target.value})}
-                  placeholder="Ex: Recall 6 Meses" 
-                  required 
-                />
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg w-96">
+            <h2 className="font-bold text-xl mb-4">Nova Regra</h2>
+            <form onSubmit={handleSubmit} className="space-y-3">
+              <input placeholder="Nome" className="w-full border p-2 rounded" onChange={e => setFormData({...formData, nome: e.target.value})} required />
+              <div className="flex gap-2">
+                <input type="number" placeholder="Dias" className="w-full border p-2 rounded" onChange={e => setFormData({...formData, dias_ausente: Number(e.target.value)})} required />
+                <input type="time" className="w-full border p-2 rounded" onChange={e => setFormData({...formData, horario: e.target.value})} required />
               </div>
-
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label className="block text-sm font-bold mb-2 text-gray-700">Dias Ausente</label>
-                  <input 
-                    type="number" 
-                    className="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition" 
-                    value={formData.dias_ausente}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({...formData, dias_ausente: Number(e.target.value)})}
-                    required 
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold mb-2 text-gray-700">Horário</label>
-                  <input 
-                    type="time" 
-                    className="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition" 
-                    value={formData.horario}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({...formData, horario: e.target.value})}
-                    required 
-                  />
-                </div>
-              </div>
-
-              <div className="mb-6">
-                <label className="block text-sm font-bold mb-2 text-gray-700">Mensagem do WhatsApp</label>
-                <textarea 
-                  className="w-full border border-gray-300 p-3 rounded-lg bg-gray-50 focus:ring-2 focus:ring-blue-500 outline-none transition" 
-                  rows={4}
-                  value={formData.mensagem}
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setFormData({...formData, mensagem: e.target.value})}
-                  required
-                />
-                <p className="text-xs text-gray-500 mt-1">Use <strong>{'{nome}'}</strong> para inserir o nome do paciente.</p>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-                <button 
-                  type="button" 
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-5 py-2.5 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition"
-                >
-                  Cancelar
-                </button>
-                <button 
-                  type="submit" 
-                  className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-lg shadow-blue-500/30 transition"
-                >
-                  Salvar Robô
-                </button>
+              <textarea placeholder="Mensagem" className="w-full border p-2 rounded" rows={3} onChange={e => setFormData({...formData, mensagem: e.target.value})} required />
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-gray-600">Cancelar</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded">Salvar</button>
               </div>
             </form>
           </div>
         </div>
       )}
-
     </div>
   );
 };

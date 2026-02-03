@@ -5,18 +5,16 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import and_
 
-# Importa o app e o banco para ter contexto
+# Importa o app e o banco
 from app import create_app, db
 from app.models import (
     AutomacaoRecall, Patient, Appointment, 
     CRMCard, CRMStage, CRMHistory, WhatsAppConnection
 )
 
-# Configuração de Logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Scheduler")
 
-# Configurações da API Evolution (Pegando do ambiente)
 EVOLUTION_API_URL = os.getenv("WHATSAPP_QR_SERVICE_URL", "http://localhost:8080").rstrip("/")
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "minha-senha-secreta")
 
@@ -26,20 +24,9 @@ def get_headers():
         "Content-Type": "application/json"
     }
 
-# ==============================================================================
-# FUNÇÃO 1: O MOTOR DE ENVIO (WhatsApp Interno)
-# ==============================================================================
 def enviar_whatsapp_interno(clinic_id, telefone, mensagem):
-    """
-    Função auxiliar para enviar mensagem sem depender da rota Flask (request context).
-    Usa a instância dinâmica 'clinica_v3_{id}'
-    """
     instance_name = f"clinica_v3_{clinic_id}"
-    
-    # Limpa o telefone (apenas números)
     phone_number = ''.join(filter(str.isdigit, telefone))
-    
-    # Se não tiver 55 no começo, adiciona (Melhor prevenir)
     if len(phone_number) == 11 and not phone_number.startswith("55"):
         phone_number = "55" + phone_number
 
@@ -60,64 +47,53 @@ def enviar_whatsapp_interno(clinic_id, telefone, mensagem):
     except Exception as e:
         return False, str(e)
 
-# ==============================================================================
-# FUNÇÃO 2: A LÓGICA DE NEGÓCIO (Recall e CRM)
-# ==============================================================================
 def processar_automacoes():
     """
-    Roda a cada 1 hora. Verifica se existe alguma automação configurada para agora.
+    Roda a cada 1 hora.
     """
     app = create_app()
     with app.app_context():
-        # 1. Pega a hora atual (Ex: "09:00", "14:00")
-        hora_atual = datetime.now().strftime("%H:00") 
-        logger.info(f"⏰ Scheduler rodando: Verificando regras para {hora_atual}...")
+        # --- CORREÇÃO DE FUSO HORÁRIO (BRASIL GMT-3) ---
+        # Pega a hora UTC e diminui 3 horas
+        hora_brasil = datetime.utcnow() - timedelta(hours=3)
+        hora_formatada = hora_brasil.strftime("%H:00")
+        
+        logger.info(f"⏰ Scheduler rodando | Hora Brasil: {hora_formatada} | Hora Server (UTC): {datetime.utcnow().strftime('%H:%M')}")
 
-        # 2. Busca automações ativas agendadas para esta hora
         regras = AutomacaoRecall.query.filter_by(ativo=True).all()
 
         for regra in regras:
-            # Verifica se o horário bate (filtro simples python para garantir formato)
-            if regra.horario_disparo and regra.horario_disparo.startswith(hora_atual[:2]):
-                logger.info(f"🚀 Executando regra '{regra.nome}' da Clínica {regra.clinic_id}")
+            # Compara com a hora do Brasil
+            if regra.horario_disparo and regra.horario_disparo.startswith(hora_formatada[:2]):
+                logger.info(f"🚀 Executando regra '{regra.nome}' (Agendada para {regra.horario_disparo})")
                 executar_regra_especifica(regra)
 
 def executar_regra_especifica(regra):
-    # Data limite: Hoje - Dias configurados (Ex: Hoje - 180 dias)
+    # Data limite: Hoje - Dias configurados
     data_corte = datetime.utcnow() - timedelta(days=regra.dias_ausente)
     
-    # === [OPCIONAL] LISTA VIP DE TESTE (Descomente para testar só com seu número) ===
-    # WHITELIST_NUMBERS = ["5521999999999"] 
-    WHITELIST_NUMBERS = [] # Deixe vazia para rodar com todos os pacientes do banco
-
-    # 1. Buscar Pacientes que sumiram (última visita antes da data de corte)
+    # Busca Pacientes elegíveis
     pacientes_candidatos = Patient.query.filter(
         Patient.clinic_id == regra.clinic_id,
         Patient.last_visit < data_corte,
         Patient.status == 'ativo',
-        Patient.receive_marketing == True  # <--- [NOVO] Só quem aceita marketing
+        Patient.receive_marketing == True 
     ).all()
 
     for paciente in pacientes_candidatos:
         try:
-            # --- TRAVA DE SEGURANÇA: MODO TESTE ---
-            if len(WHITELIST_NUMBERS) > 0 and paciente.phone not in WHITELIST_NUMBERS:
-                logger.info(f"🛡️ Pulei {paciente.name} pois não está na WhiteList de teste.")
-                continue 
-
-            # --- FILTRO 1: SEGURANÇA (Já tem consulta marcada?) ---
+            # 1. Verifica se já tem consulta futura
             tem_agendamento = Appointment.query.filter(
                 Appointment.clinic_id == regra.clinic_id,
                 Appointment.patient_id == paciente.id,
-                Appointment.date_time > datetime.utcnow(), # Futuro
+                Appointment.date_time > datetime.utcnow(),
                 Appointment.status != 'cancelled'
             ).first()
 
             if tem_agendamento:
-                continue # Pula, não vamos incomodar quem já marcou.
+                continue 
 
-            # --- FILTRO 2: CRM (Já está sendo trabalhado?) ---
-            # Verifica se existe um card ABERTO (não ganho nem perdido)
+            # 2. Verifica se já está no CRM (Card Aberto)
             card_aberto = CRMCard.query.filter(
                 CRMCard.clinic_id == regra.clinic_id,
                 CRMCard.paciente_id == paciente.id,
@@ -125,24 +101,17 @@ def executar_regra_especifica(regra):
             ).first()
 
             if card_aberto:
-                continue # Pula, já estamos conversando com ele.
+                continue 
 
-            # === AÇÃO: DISPARAR RECALL ===
-            
-            # 1. Prepara a mensagem
-            msg_final = regra.mensagem_template.replace("{nome}", paciente.name) if regra.mensagem_template else f"Olá {paciente.name}, faz tempo que não te vemos! Vamos agendar um checkup?"
-
-            # 2. Envia WhatsApp
+            # 3. Envia Mensagem
+            msg_final = regra.mensagem_template.replace("{nome}", paciente.name) if regra.mensagem_template else f"Olá {paciente.name}!"
             sucesso, log_msg = enviar_whatsapp_interno(regra.clinic_id, paciente.phone, msg_final)
 
             if sucesso:
                 logger.info(f"✅ Recall enviado para {paciente.name}")
                 
-                # 3. CRIA CARD NO CRM (KANBAN)
-                # Busca a coluna inicial (Ex: "A Contactar")
+                # Cria Card no CRM
                 estagio_inicial = CRMStage.query.filter_by(clinic_id=regra.clinic_id, is_initial=True).first()
-
-                # Fallback: Se não tiver estágio, pega o primeiro
                 if not estagio_inicial:
                     estagio_inicial = CRMStage.query.filter_by(clinic_id=regra.clinic_id).order_by(CRMStage.ordem).first()
 
@@ -157,7 +126,6 @@ def executar_regra_especifica(regra):
                     db.session.add(novo_card)
                     db.session.flush()
 
-                    # 4. REGISTRA HISTÓRICO
                     hist = CRMHistory(
                         card_id=novo_card.id,
                         tipo="BOT_RECALL",
@@ -165,7 +133,6 @@ def executar_regra_especifica(regra):
                     )
                     db.session.add(hist)
                     db.session.commit()
-            
             else:
                 logger.error(f"❌ Falha ao enviar para {paciente.name}: {log_msg}")
 
@@ -173,12 +140,8 @@ def executar_regra_especifica(regra):
             logger.error(f"Erro ao processar paciente {paciente.id}: {e}")
             db.session.rollback()
 
-# ==============================================================================
-# INICIALIZADOR
-# ==============================================================================
 def start_scheduler():
     scheduler = BackgroundScheduler()
-    # Roda de hora em hora
+    # Roda a cada 60 minutos
     scheduler.add_job(processar_automacoes, 'interval', minutes=60)
     scheduler.start()
-    logger.info("🚀 Scheduler de Recall Iniciado com Sucesso!")
