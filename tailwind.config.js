@@ -12,7 +12,10 @@ export default {
         accent: '#00d084',     // Verde (Status/Botões)
         background: '#f4f6f8', // Cinza de fundo
         surface: '#ffffff',    // Branco dos cards
-      }
+      },
+      fontFamily: {
+        sans: ['Inter', 'sans-serif'],
+      },
     },
   },
   plugins: [],
