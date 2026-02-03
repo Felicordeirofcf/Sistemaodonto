@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 // --- TIPAGEM ---
 interface AutomationRule {
@@ -23,15 +23,15 @@ const MarketingPage: React.FC = () => {
     mensagem: 'Olá {nome}, faz tempo que não te vemos! Vamos cuidar desse sorriso? 🦷'
   });
 
-  // ✅ CORREÇÃO APLICADA: URL Relativa
-  // Ao usar apenas "/api/marketing", funciona tanto localmente quanto no Render (HTTPS).
+  // URL Relativa (Funciona no Localhost e no Render)
   const API_URL = '/api/marketing'; 
   
-  // Pega o token salvo no login (mesma chave usada no App.tsx)
+  // Pega o token salvo no login
   const token = localStorage.getItem('odonto_token'); 
 
   // --- BUSCAR REGRAS (GET) ---
-  const fetchRules = async () => {
+  // Envolvido em useCallback para evitar loops ou avisos do useEffect
+  const fetchRules = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/automations`, {
         method: 'GET',
@@ -50,12 +50,12 @@ const MarketingPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [API_URL, token]);
 
   // Carrega as regras ao abrir a página
   useEffect(() => {
     fetchRules();
-  }, []);
+  }, [fetchRules]);
 
   // --- SALVAR NOVA REGRA (POST) ---
   const handleSubmit = async (e: React.FormEvent) => {
@@ -75,7 +75,7 @@ const MarketingPage: React.FC = () => {
       setIsModalOpen(false); // Fecha o modal
       fetchRules(); // Atualiza a lista na tela
       
-      // Limpa o formulário (opcional)
+      // Limpa o formulário
       setFormData({
         nome: '',
         dias_ausente: 180,
@@ -84,13 +84,13 @@ const MarketingPage: React.FC = () => {
       });
 
     } catch (error) {
-      alert('Erro ao salvar regra. Verifique se está logado.');
+      window.alert('Erro ao salvar regra. Verifique se está logado.');
     }
   };
 
   // --- DELETAR REGRA (DELETE) ---
   const handleDelete = async (id: number) => {
-    if (!confirm('Tem certeza que deseja apagar este robô?')) return;
+    if (!window.confirm('Tem certeza que deseja apagar este robô?')) return;
     try {
       const res = await fetch(`${API_URL}/automations/${id}`, {
         method: 'DELETE',
@@ -104,7 +104,7 @@ const MarketingPage: React.FC = () => {
       
       fetchRules(); // Atualiza a lista
     } catch (error) {
-      alert('Erro ao deletar regra.');
+      window.alert('Erro ao deletar regra.');
     }
   };
 
@@ -180,7 +180,7 @@ const MarketingPage: React.FC = () => {
         )}
       </div>
 
-      {/* PRÉVIA DO KANBAN (Visual Apenas - Conectaremos ao Banco em breve) */}
+      {/* PRÉVIA DO KANBAN (Visual) */}
       <h3 className="text-2xl font-bold text-slate-800 mb-4">Funil de Recuperação (CRM)</h3>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
@@ -190,7 +190,6 @@ const MarketingPage: React.FC = () => {
             <span>A CONTACTAR</span>
             <span className="bg-gray-300 text-gray-600 px-2 py-0.5 rounded-full text-xs font-bold">Auto</span>
           </div>
-          {/* Card Exemplo */}
           <div className="bg-white p-4 rounded-lg shadow-sm mb-3 border-l-4 border-yellow-400 cursor-pointer hover:shadow-md transition">
             <div className="font-bold text-gray-800">Maria Silva</div>
             <div className="text-xs text-gray-500 mt-1">Robô enviou msg hoje às 09:00</div>
@@ -200,7 +199,6 @@ const MarketingPage: React.FC = () => {
          {/* COLUNA 2: RESPONDIDOS */}
          <div className="bg-gray-100 p-4 rounded-xl min-h-[200px]">
           <div className="font-bold text-blue-600 mb-4">RESPONDIDOS</div>
-          {/* Card Exemplo */}
           <div className="bg-white p-4 rounded-lg shadow-sm mb-3 border-l-4 border-blue-500 cursor-pointer hover:shadow-md transition">
             <div className="font-bold text-gray-800">João Souza</div>
             <div className="text-xs text-gray-500 mt-1">💬 "Vou ver minha agenda..."</div>
@@ -210,7 +208,6 @@ const MarketingPage: React.FC = () => {
          {/* COLUNA 3: RECUPERADOS */}
          <div className="bg-gray-100 p-4 rounded-xl min-h-[200px]">
           <div className="font-bold text-green-600 mb-4">RECUPERADOS</div>
-          {/* Card Exemplo */}
           <div className="bg-white p-4 rounded-lg shadow-sm mb-3 border-l-4 border-green-500 cursor-pointer hover:shadow-md transition opacity-75">
             <div className="font-bold text-gray-800">Ana Clara</div>
             <div className="text-xs text-gray-500 mt-1">✅ Agendou para 15/02</div>
@@ -232,7 +229,7 @@ const MarketingPage: React.FC = () => {
                   type="text" 
                   className="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition" 
                   value={formData.nome}
-                  onChange={e => setFormData({...formData, nome: e.target.value})}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({...formData, nome: e.target.value})}
                   placeholder="Ex: Recall 6 Meses" 
                   required 
                 />
@@ -245,7 +242,7 @@ const MarketingPage: React.FC = () => {
                     type="number" 
                     className="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition" 
                     value={formData.dias_ausente}
-                    onChange={e => setFormData({...formData, dias_ausente: Number(e.target.value)})}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({...formData, dias_ausente: Number(e.target.value)})}
                     required 
                   />
                 </div>
@@ -255,7 +252,7 @@ const MarketingPage: React.FC = () => {
                     type="time" 
                     className="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition" 
                     value={formData.horario}
-                    onChange={e => setFormData({...formData, horario: e.target.value})}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({...formData, horario: e.target.value})}
                     required 
                   />
                 </div>
@@ -267,7 +264,7 @@ const MarketingPage: React.FC = () => {
                   className="w-full border border-gray-300 p-3 rounded-lg bg-gray-50 focus:ring-2 focus:ring-blue-500 outline-none transition" 
                   rows={4}
                   value={formData.mensagem}
-                  onChange={e => setFormData({...formData, mensagem: e.target.value})}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setFormData({...formData, mensagem: e.target.value})}
                   required
                 />
                 <p className="text-xs text-gray-500 mt-1">Use <strong>{'{nome}'}</strong> para inserir o nome do paciente.</p>
