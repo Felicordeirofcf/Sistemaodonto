@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint('marketing_campaigns', __name__)
 
-# Configurações da API (Pega do .env ou usa padrão)
+# Configurações da API
 EVOLUTION_API_URL = os.getenv("WHATSAPP_QR_SERVICE_URL", "http://localhost:8080").rstrip("/")
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "")
 
@@ -109,7 +109,7 @@ def delete_campaign(id):
         return jsonify({"error": str(e)}), 500
 
 # ==============================================================================
-# 2. ROTA DE RASTREAMENTO INTELIGENTE (SAAS)
+# 2. ROTA DE RASTREAMENTO (CORRIGIDA)
 # ==============================================================================
 @bp.route('/c/<code>', methods=['GET'])
 def track_click_and_redirect(code):
@@ -119,9 +119,9 @@ def track_click_and_redirect(code):
         return "<h1 style='font-family:sans-serif;text-align:center;margin-top:50px;'>⚠️ Link Inválido ou Não Encontrado</h1>", 404
 
     if not campaign.active:
-        return "<h1 style='font-family:sans-serif;text-align:center;margin-top:50px;'>⏸️ Campanha Pausada pelo Anunciante</h1>", 200
+        return "<h1 style='font-family:sans-serif;text-align:center;margin-top:50px;'>⏸️ Campanha Pausada</h1>", 200
     
-    # 1. Registra o Clique (Métrica)
+    # 1. Registra o Clique
     try:
         campaign.clicks_count += 1
         event = LeadEvent(
@@ -134,23 +134,21 @@ def track_click_and_redirect(code):
     except Exception as e:
         print(f"Erro ao salvar métrica: {e}")
 
-    # 2. Descobre o Número Automaticamente (Lógica SaaS)
+    # 2. Descobre o Número (Lógica Blindada)
     target_phone = None
     
-    # Busca conexão no banco
+    # Tenta conexão do banco
     conn = WhatsAppConnection.query.filter_by(clinic_id=campaign.clinic_id).first()
     
-    # TENTATIVA 1: O número já está salvo no banco?
+    # A) Tenta cache do banco
     if conn and conn.session_data:
-        me = conn.session_data.get('me', {})
-        jid = me.get('id') # ex: 5511999999999:2@s.whatsapp.net
+        jid = conn.session_data.get('me', {}).get('id')
         if jid:
             target_phone = jid.split('@')[0].split(':')[0]
-            print(f"✅ [CACHE] Número encontrado no banco: {target_phone}")
 
-    # TENTATIVA 2: Se não tem no banco, busca na Evolution API agora
-    if not target_phone and conn:
-        print(f"🔄 [API] Buscando número na Evolution para instância: {conn.instance_name}")
+    # B) Tenta API Evolution (Se não achou no banco)
+    if not target_phone:
+        print(f"🔄 [API] Buscando instâncias na Evolution...")
         try:
             url = f"{EVOLUTION_API_URL}/instance/fetchInstances"
             headers = {"apikey": EVOLUTION_API_KEY}
@@ -158,28 +156,29 @@ def track_click_and_redirect(code):
             
             if resp.status_code == 200:
                 instances = resp.json()
-                # Procura a instância correta na lista
-                my_instance = next((i for i in instances if i.get('instance', {}).get('instanceName') == conn.instance_name), None)
+                # Pega a PRIMEIRA instância que estiver conectada (status: open)
+                active_instance = next((i for i in instances if i.get('instance', {}).get('status') == 'open'), None)
                 
-                if my_instance and my_instance.get('instance', {}).get('owner'):
-                    owner_jid = my_instance['instance']['owner'] # ex: 5511999999999@s.whatsapp.net
+                if active_instance:
+                    owner_jid = active_instance['instance']['owner'] # ex: 5511999999@s.whatsapp.net
                     target_phone = owner_jid.split('@')[0].split(':')[0]
+                    print(f"✅ [API] Instância encontrada: {active_instance['instance']['instanceName']} -> {target_phone}")
                     
-                    # Salva no banco para não precisar consultar de novo na próxima
-                    conn.session_data = {"me": {"id": owner_jid}}
-                    conn.status = "connected"
-                    db.session.commit()
-                    print(f"✅ [API] Número recuperado e salvo: {target_phone}")
+                    # Salva no banco para ficar rápido na próxima
+                    if conn:
+                        conn.session_data = {"me": {"id": owner_jid}}
+                        conn.status = "connected"
+                        db.session.commit()
         except Exception as e:
             print(f"❌ Erro ao consultar Evolution API: {e}")
 
-    # FALHA TOTAL: Se não conseguiu achar o número de jeito nenhum
+    # C) Fallback Final (Se tudo falhar, usa um padrão ou erro)
     if not target_phone:
-        return """
+         return """
         <div style="font-family:sans-serif; text-align:center; padding:50px;">
-            <h1>⚠️ WhatsApp Não Configurado</h1>
-            <p>A clínica ainda não conectou o WhatsApp ao sistema corretamente.</p>
-            <p>Por favor, entre em contato por outro meio.</p>
+            <h1>⚠️ WhatsApp Não Conectado</h1>
+            <p>Não foi possível identificar o número da clínica.</p>
+            <p>Verifique se o QR Code está conectado no painel.</p>
         </div>
         """, 503
 
