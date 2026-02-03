@@ -1,14 +1,18 @@
 from flask import Blueprint, request, jsonify
 from app.models import db, Clinic, CRMStage, CRMCard, Lead, WhatsAppConnection
 import logging
-import datetime
+import requests
+import os
 
-# Configuração de Logs
 logger = logging.getLogger(__name__)
 
 bp = Blueprint('marketing_webhook', __name__)
 
-# Palavras que ATIVAM o robô (para ele não responder seus amigos falando "e ai")
+# Configurações da API
+EVOLUTION_API_URL = os.getenv("WHATSAPP_QR_SERVICE_URL", "http://localhost:8080").rstrip("/")
+EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "")
+
+# Palavras que ATIVAM o robô
 GATILHOS_BOT = [
     "olá", "ola", "oi", "bom dia", "boa tarde", "boa noite", 
     "tudo bem", "agendar", "marcar", "consulta", "preço", 
@@ -19,22 +23,21 @@ GATILHOS_BOT = [
 def whatsapp_webhook():
     data = request.get_json()
     
-    # 1. Validação Básica
     if not data or 'data' not in data:
         return jsonify({"status": "ignored", "reason": "no data"}), 200
 
     payload = data['data']
     
-    # 2. Verifica se é mensagem de texto recebida
+    # Verifica se é mensagem enviada por mim (ignora)
     if 'key' not in payload or payload['key'].get('fromMe') == True:
         return jsonify({"status": "ignored", "reason": "from_me"}), 200
 
-    # 3. Extrai dados vitais
-    remote_jid = payload['key'].get('remoteJid') # numero@s.whatsapp.net
+    # Dados da Mensagem
+    remote_jid = payload['key'].get('remoteJid') 
     phone = remote_jid.split('@')[0]
     push_name = payload.get('pushName', 'Paciente')
     
-    # Pega o texto da mensagem (tenta vários campos possíveis da API)
+    # Extrai texto
     message_text = ""
     if 'message' in payload:
         msg = payload['message']
@@ -44,80 +47,91 @@ def whatsapp_webhook():
             message_text = msg['extendedTextMessage'].get('text', '')
     
     message_text = message_text.lower().strip()
-    
     if not message_text:
         return jsonify({"status": "ignored", "reason": "no text"}), 200
 
-    # 4. Descobre a Clínica dona dessa instância
-    instance_owner = data.get('instance') # Nome da instância na Evolution
-    # Tenta achar conexão pelo nome da instância ou pelo número dono
-    conn = None
-    
-    # Busca simples: A primeira clínica que tiver conectada (para MVP)
-    # Num sistema real, buscaria pelo instance_name exato
+    # --- CORREÇÃO DO ERRO "NENHUMA CLÍNICA CONECTADA" ---
+    # Tenta achar conexão no banco
     conn = WhatsAppConnection.query.filter_by(status='connected').first()
     
+    # Se não achou no banco, força busca na API (Auto-Recovery)
     if not conn:
-        print("⚠️ Nenhuma clínica conectada encontrada para processar mensagem.")
+        print("⚠️ Conexão não encontrada no DB. Buscando na API...")
+        try:
+            url = f"{EVOLUTION_API_URL}/instance/fetchInstances"
+            headers = {"apikey": EVOLUTION_API_KEY}
+            resp = requests.get(url, headers=headers, timeout=5)
+            
+            if resp.status_code == 200:
+                instances = resp.json()
+                # Pega a primeira instância ONLINE
+                active_instance = next((i for i in instances if i.get('instance', {}).get('status') == 'open'), None)
+                
+                if active_instance:
+                    owner_jid = active_instance['instance']['owner']
+                    instance_name = active_instance['instance']['instanceName']
+                    
+                    # Salva/Cria no banco agora mesmo
+                    conn = WhatsAppConnection.query.filter_by(instance_name=instance_name).first()
+                    if not conn:
+                        conn = WhatsAppConnection(
+                            clinic_id=1, # Assume clínica 1 para recuperação
+                            instance_name=instance_name,
+                            status='connected',
+                            session_data={"me": {"id": owner_jid}}
+                        )
+                        db.session.add(conn)
+                    else:
+                        conn.status = 'connected'
+                        conn.session_data = {"me": {"id": owner_jid}}
+                    
+                    db.session.commit()
+                    print(f"✅ Conexão recuperada e salva: {instance_name}")
+        except Exception as e:
+            print(f"❌ Erro ao tentar recuperar conexão: {e}")
+
+    if not conn:
+        print("❌ FALHA FATAL: Nenhuma clínica conectada encontrada.")
         return jsonify({"status": "error", "reason": "no clinic connected"}), 200
 
     clinic_id = conn.clinic_id
 
-    # 5. Lógica do Robô (Fluxo Simples)
-    # Verifica se já existe um card ABERTO para esse telefone
+    # --- LÓGICA DE CRM ---
     existing_card = CRMCard.query.join(CRMStage).filter(
         CRMStage.clinic_id == clinic_id,
         CRMCard.paciente_phone == phone,
-        CRMStage.is_success == False # Apenas cards em andamento
+        CRMStage.is_success == False
     ).first()
 
-    # --- CENÁRIO A: JÁ ESTÁ NO CRM (Não faz nada ou avisa humano) ---
     if existing_card:
-        print(f"🔄 Paciente {phone} já está no funil. Robô silenciado.")
+        print(f"🔄 Paciente {phone} já no funil.")
         return jsonify({"status": "ignored", "reason": "already in crm"}), 200
 
-    # --- CENÁRIO B: NOVO LEAD (Inicia Atendimento) ---
-    
-    # Filtro: Só ativa se tiver palavra chave (Evita responder amigos)
+    # Filtro de Gatilho
     eh_gatilho = any(palavra in message_text for palavra in GATILHOS_BOT)
     
     if eh_gatilho:
-        print(f"🤖 Robô Ativado para: {phone} | Msg: {message_text}")
+        print(f"🤖 Novo Lead Detectado: {phone}")
         
-        # 1. Cria o Card na Coluna "Novo Lead" (Busca Dinâmica)
+        # Busca coluna inicial de forma segura
         stage = CRMStage.query.filter_by(clinic_id=clinic_id, is_initial=True).first()
-        
-        # Se não achou a marcada como inicial, pega a primeira que tiver
         if not stage:
             stage = CRMStage.query.filter_by(clinic_id=clinic_id).order_by(CRMStage.ordem).first()
             
         if stage:
             try:
-                # Salva no Banco
                 novo_card = CRMCard(
                     stage_id=stage.id,
-                    paciente_nome=push_name, # Salva o nome do WhatsApp (ex: Jesus is King)
+                    paciente_nome=push_name,
                     paciente_phone=phone,
-                    historico_conversas=f"Iniciou via WhatsApp: {message_text}",
+                    historico_conversas=f"WhatsApp: {message_text}",
                     valor_proposta=0
                 )
                 db.session.add(novo_card)
                 db.session.commit()
-                print(f"✅ Lead Salvo no CRM! ID: {novo_card.id}")
-
-                # 2. Manda a Resposta Automática (via Evolution API)
-                # Você precisaria implementar o envio de volta aqui ou usar a função de envio existente
-                # Como este código é o webhook, ele apenas processa a entrada.
-                # O envio da resposta "Olá, vi seu contato..." idealmente é feito aqui chamando a API.
-                
-                # EXEMPLO DE RESPOSTA AUTOMÁTICA (Descomente se tiver a função send_message pronta)
-                # from app.utils.whatsapp import send_whatsapp_message
-                # send_whatsapp_message(phone, "Olá! 👋 Vi seu contato. Sou o assistente virtual da clínica. Como posso ajudar?", conn.instance_name)
-
+                print(f"✅ Card criado no CRM (ID: {novo_card.id})")
             except Exception as e:
-                print(f"❌ Erro ao salvar no CRM: {e}")
+                print(f"❌ Erro DB: {e}")
                 db.session.rollback()
-        else:
-            print("❌ Nenhuma etapa de CRM configurada para esta clínica.")
 
     return jsonify({"status": "processed"}), 200

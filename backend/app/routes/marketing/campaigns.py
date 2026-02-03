@@ -109,18 +109,18 @@ def delete_campaign(id):
         return jsonify({"error": str(e)}), 500
 
 # ==============================================================================
-# 2. ROTA DE RASTREAMENTO (CORRIGIDA PARA NÃO ABRIR O SITE)
+# 2. ROTA DE RASTREAMENTO (FORÇANDO REDIRECT EXTERNO)
 # ==============================================================================
 @bp.route('/c/<code>', methods=['GET'])
 def track_click_and_redirect(code):
     # Busca campanha
     campaign = Campaign.query.filter_by(tracking_code=code).first()
     
-    # SE NÃO EXISTE: Redireciona para o Google (Evita carregar o React)
+    # 🔴 SE NÃO EXISTE: Joga para o Google (Isso mata o carregamento do React)
     if not campaign:
         return redirect("https://www.google.com/search?q=Erro+Link+Nao+Encontrado+SistemaOdonto")
 
-    # SE PAUSADA: Redireciona para o Google (Evita carregar o React)
+    # 🔴 SE PAUSADA: Joga para o Google
     if not campaign.active:
         return redirect("https://www.google.com/search?q=Campanha+Pausada+Pelo+Anunciante")
     
@@ -137,19 +137,18 @@ def track_click_and_redirect(code):
     except Exception as e:
         print(f"Erro métrica: {e}")
 
-    # 2. Descobre o Número (Lógica SaaS - Busca qualquer instância ativa)
+    # 2. Descobre o Número (Lógica SaaS)
     target_phone = None
     
-    # A) Tenta cache do banco (se já tiver salvo o numero)
+    # A) Tenta cache do banco
     conn = WhatsAppConnection.query.filter_by(clinic_id=campaign.clinic_id).first()
     if conn and conn.session_data:
         jid = conn.session_data.get('me', {}).get('id')
         if jid:
             target_phone = jid.split('@')[0].split(':')[0]
 
-    # B) Tenta API Evolution (Busca QUALQUER instância online)
+    # B) Tenta API Evolution (Se não achou no banco)
     if not target_phone:
-        print(f"🔄 [API] Consultando Evolution API para descobrir número...")
         try:
             url = f"{EVOLUTION_API_URL}/instance/fetchInstances"
             headers = {"apikey": EVOLUTION_API_KEY}
@@ -157,23 +156,20 @@ def track_click_and_redirect(code):
             
             if resp.status_code == 200:
                 instances = resp.json()
-                # Pega a primeira instância com status 'open'
                 active_instance = next((i for i in instances if i.get('instance', {}).get('status') == 'open'), None)
                 
                 if active_instance:
-                    owner_jid = active_instance['instance']['owner'] # ex: 551199999@s.whatsapp.net
+                    owner_jid = active_instance['instance']['owner']
                     target_phone = owner_jid.split('@')[0].split(':')[0]
-                    print(f"✅ [API] Número encontrado na Evolution: {target_phone}")
                     
-                    # Salva no banco para a próxima vez ser rápida
+                    # Salva cache
                     if conn:
                         conn.session_data = {"me": {"id": owner_jid}}
                         conn.status = "connected"
                         db.session.commit()
-        except Exception as e:
-            print(f"❌ Erro ao consultar Evolution: {e}")
+        except: pass
 
-    # C) Fallback de Emergência (Redireciona para erro externo)
+    # C) Fallback de Emergência
     if not target_phone:
          return redirect("https://www.google.com/search?q=Erro+WhatsApp+Nao+Conectado+SistemaOdonto")
 
