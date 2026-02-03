@@ -53,7 +53,9 @@ def create_app():
         from .models import (
             Clinic, User, Patient, InventoryItem, Appointment, Transaction,
             WhatsAppConnection, WhatsAppContact, MessageLog, ScheduledMessage,
-            AutomacaoRecall, CRMStage, CRMCard, CRMHistory
+            AutomacaoRecall, CRMStage, CRMCard, CRMHistory,
+            # ✅ NOVOS MODELS DE MARKETING
+            Campaign, Lead, LeadEvent
         )
 
         # Cria as tabelas se não existirem (Segurança para SQLite/Dev)
@@ -90,13 +92,24 @@ def create_app():
     from .routes.team_routes import team_bp
     app.register_blueprint(team_bp, url_prefix="/api")
 
-    # ✅ WhatsApp e Marketing
+    # ✅ WhatsApp e Marketing (Core)
     from .routes.marketing.whatsapp import bp as marketing_whatsapp_bp
     app.register_blueprint(marketing_whatsapp_bp, url_prefix="/api/marketing")
 
-    # ✅ [NOVO] Automações e Regras (Adicionado Aqui)
+    # ✅ Automações e Regras
     from .routes.marketing.automations import bp as automations_bp
     app.register_blueprint(automations_bp, url_prefix="/api/marketing")
+
+    # ✅ Campanhas e Leads (Gestão + Links Públicos)
+    from .routes.marketing.campaigns import bp as campaigns_bp
+    # 1. Registra para API de gestão (ex: /api/marketing/campaigns)
+    app.register_blueprint(campaigns_bp, url_prefix="/api/marketing")
+    # 2. Registra na RAIZ para o link curto funcionar (ex: /c/xyz12)
+    app.register_blueprint(campaigns_bp, name="campaigns_public", url_prefix="")
+
+    # ✅ [NOVO] Webhook do WhatsApp (Adicione ISTO para o bot responder)
+    from .routes.marketing.webhook import bp as webhook_bp
+    app.register_blueprint(webhook_bp, url_prefix="/api/marketing")
 
     # --- ROTAS DE SISTEMA (RESET E SEED) ---
     @app.route("/api/force_reset_db")
@@ -212,10 +225,31 @@ def create_app():
                 ALTER TABLE patients ADD COLUMN IF NOT EXISTS receive_marketing BOOLEAN DEFAULT TRUE;
             """)
 
+            # 5. [NOVO] Tabelas de Marketing (Campanhas, Leads, Eventos)
+            sql_marketing = text("""
+                CREATE TABLE IF NOT EXISTS marketing_campaigns (
+                    id SERIAL PRIMARY KEY, clinic_id INTEGER NOT NULL, name VARCHAR(100), slug VARCHAR(50), 
+                    tracking_code VARCHAR(20), whatsapp_message_template TEXT, landing_page_data JSON, 
+                    clicks_count INTEGER DEFAULT 0, leads_count INTEGER DEFAULT 0, active BOOLEAN DEFAULT TRUE, 
+                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS marketing_leads (
+                    id SERIAL PRIMARY KEY, clinic_id INTEGER NOT NULL, campaign_id INTEGER, name VARCHAR(100), 
+                    phone VARCHAR(30), status VARCHAR(20) DEFAULT 'novo', source VARCHAR(50), 
+                    chatbot_state VARCHAR(50) DEFAULT 'START', chatbot_data JSON DEFAULT '{}', 
+                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(), updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS marketing_lead_events (
+                    id SERIAL PRIMARY KEY, lead_id INTEGER, campaign_id INTEGER, event_type VARCHAR(50), 
+                    metadata_json JSON, created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                );
+            """)
+
             db.session.execute(sql_recall)
             db.session.execute(sql_stage)
             db.session.execute(sql_card)
             db.session.execute(sql_coluna)
+            db.session.execute(sql_marketing) # Executa as novas
             db.session.commit()
             
             return jsonify({"message": "Tabelas recriadas via SQL com sucesso!"}), 200
