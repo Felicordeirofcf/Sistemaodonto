@@ -109,29 +109,20 @@ def delete_campaign(id):
         return jsonify({"error": str(e)}), 500
 
 # ==============================================================================
-# 2. ROTA DE RASTREAMENTO INTELIGENTE
+# 2. ROTA DE RASTREAMENTO (CORRIGIDA PARA NÃO ABRIR O SITE)
 # ==============================================================================
 @bp.route('/c/<code>', methods=['GET'])
 def track_click_and_redirect(code):
     # Busca campanha
     campaign = Campaign.query.filter_by(tracking_code=code).first()
     
-    # ✅ MUDANÇA: Retorna status 200 com HTML para evitar que o frontend React carregue a tela de login
+    # SE NÃO EXISTE: Redireciona para o Google (Evita carregar o React)
     if not campaign:
-        return """
-        <div style="font-family:sans-serif; text-align:center; padding:50px; color:#333;">
-            <h1 style="color:#e11d48; font-size:24px;">⚠️ Link não encontrado</h1>
-            <p>Esta campanha não existe mais ou o link está incorreto.</p>
-        </div>
-        """, 200
+        return redirect("https://www.google.com/search?q=Erro+Link+Nao+Encontrado+SistemaOdonto")
 
+    # SE PAUSADA: Redireciona para o Google (Evita carregar o React)
     if not campaign.active:
-        return """
-        <div style="font-family:sans-serif; text-align:center; padding:50px; color:#333;">
-            <h1 style="color:#f59e0b; font-size:24px;">⏸️ Campanha Pausada</h1>
-            <p>Este link está temporariamente indisponível.</p>
-        </div>
-        """, 200
+        return redirect("https://www.google.com/search?q=Campanha+Pausada+Pelo+Anunciante")
     
     # 1. Registra o Clique
     try:
@@ -182,17 +173,11 @@ def track_click_and_redirect(code):
         except Exception as e:
             print(f"❌ Erro ao consultar Evolution: {e}")
 
-    # C) Fallback de Emergência
+    # C) Fallback de Emergência (Redireciona para erro externo)
     if not target_phone:
-         return """
-        <div style="font-family:sans-serif; text-align:center; padding:50px;">
-            <h1>⚠️ WhatsApp Não Conectado</h1>
-            <p>O sistema não conseguiu identificar o número da clínica automaticamente.</p>
-            <p>Verifique se o QR Code está lido na aba WhatsApp.</p>
-        </div>
-        """, 503
+         return redirect("https://www.google.com/search?q=Erro+WhatsApp+Nao+Conectado+SistemaOdonto")
 
-    # 3. Redireciona
+    # 3. Redireciona para o WhatsApp
     text_encoded = urllib.parse.quote(campaign.whatsapp_message_template)
     whatsapp_url = f"https://api.whatsapp.com/send?phone={target_phone}&text={text_encoded}"
     
