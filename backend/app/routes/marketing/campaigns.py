@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, redirect, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models import db, Campaign, Lead, LeadEvent, WhatsAppConnection
+from app.models import db, Campaign, Lead, LeadEvent, WhatsAppConnection, Clinic
 import shortuuid
 import qrcode
 from io import BytesIO
@@ -29,9 +29,11 @@ def create_campaign():
     clinic_id = identity.get('clinic_id') if isinstance(identity, dict) else 1
     data = request.get_json() or {}
 
+    # Geração de link curto único
     code = shortuuid.ShortUUID().random(length=5)
 
     msg_template = data.get('message', "Olá, gostaria de saber mais.")
+    # Garante que o tracking_code esteja na mensagem para identificação no webhook
     if f"[ref:{code}]" not in msg_template:
         msg_template += f" [ref:{code}]"
 
@@ -49,6 +51,7 @@ def create_campaign():
     db.session.commit()
 
     base_url = request.host_url.rstrip('/')
+    # Link curto conforme solicitado: /api/marketing/c/<code>
     full_tracking_url = f"{base_url}/api/marketing/c/{code}"
 
     return jsonify({
@@ -150,11 +153,12 @@ def track_click_and_redirect(code):
             db.session.rollback()
             logger.warning(f"⚠️ Erro ao salvar métrica: {e}")
 
-        # 2. LÓGICA DEFINITIVA: Pega o número direto do cadastro da clínica
-        # Isso evita que o sistema precise consultar a API Evolution no momento do clique
-        target_phone = campaign.clinic.whatsapp_number
+        # 2. LÓGICA DEFINITIVA: Pega o número direto do cadastro da clínica (âncora)
+        # Isso evita falhas de API e garante redirecionamento instantâneo
+        clinic = Clinic.query.get(campaign.clinic_id)
+        target_phone = clinic.whatsapp_number if clinic else None
         
-        # Caso a clínica ainda não tenha o número cadastrado, usa o seu número padrão como segurança
+        # Fallback de segurança
         if not target_phone:
             target_phone = "5521987708652" 
         

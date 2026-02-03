@@ -1,23 +1,12 @@
 from flask import Blueprint, request, jsonify
-from app.models import db, Clinic, CRMStage, CRMCard, Lead, WhatsAppConnection
+from app.models import db, Clinic, CRMStage, CRMCard, Lead, Campaign, LeadEvent
 import logging
-import requests
 import os
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint('marketing_webhook', __name__)
-
-# Configurações da API Evolution
-EVOLUTION_API_URL = os.getenv("WHATSAPP_QR_SERVICE_URL", "http://localhost:8080").rstrip("/")
-EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "")
-
-# Palavras que ATIVAM o robô
-GATILHOS_BOT = [
-    "olá", "ola", "oi", "bom dia", "boa tarde", "boa noite", 
-    "tudo bem", "agendar", "marcar", "consulta", "preço", 
-    "valor", "doutor", "dentista", "endereço", "avaliac", "avaliaç"
-]
 
 def garantir_etapas_crm(clinic_id):
     """Garante que o funil completo exista (SaaS Ready)"""
@@ -71,8 +60,8 @@ def whatsapp_webhook():
         elif 'extendedTextMessage' in msg:
             message_text = msg['extendedTextMessage'].get('text', '')
     
-    message_text = message_text.lower().strip()
-    if not message_text:
+    message_text_lower = message_text.lower().strip()
+    if not message_text_lower:
         return jsonify({"status": "ignored", "reason": "no text"}), 200
 
     # 3. IDENTIFICAÇÃO DA CLÍNICA (LÓGICA DE ÂNCORA)
@@ -82,46 +71,86 @@ def whatsapp_webhook():
 
     # Busca a clínica dona deste número no cadastro fixo
     clinic = Clinic.query.filter_by(whatsapp_number=owner_phone).first()
-    
-    # Fallback para Clínica 1 se o número não estiver vinculado
     clinic_id = clinic.id if clinic else 1
 
-    # 4. Garante infraestrutura do CRM
-    garantir_etapas_crm(clinic_id)
+    # 4. DETECÇÃO DE CAMPANHA (tracking_code)
+    campaign = None
+    if "[ref:" in message_text:
+        try:
+            # Extrai o código entre [ref: e ]
+            code = message_text.split("[ref:")[1].split("]")[0]
+            campaign = Campaign.query.filter_by(tracking_code=code).first()
+        except Exception as e:
+            logger.warning(f"⚠️ Falha ao extrair tracking_code: {e}")
 
-    # 5. Evita duplicidade (não cria novo card se já houver um aberto)
-    existing_card = CRMCard.query.filter(
-        CRMCard.clinic_id == clinic_id,
-        CRMCard.paciente_phone == phone,
-        CRMCard.status == 'open'
-    ).first()
+    # 5. CONVERSÃO AUTOMÁTICA EM LEAD
+    if campaign:
+        # Garante infraestrutura do CRM
+        garantir_etapas_crm(clinic_id)
 
-    if existing_card:
-        return jsonify({"status": "ignored", "reason": "already in crm"}), 200
+        # Verifica se já existe um lead ou card aberto para este telefone
+        existing_card = CRMCard.query.filter(
+            CRMCard.clinic_id == clinic_id,
+            CRMCard.paciente_phone == phone,
+            CRMCard.status == 'open'
+        ).first()
 
-    # 6. Filtro de Gatilho e Criação de Card
-    eh_gatilho = any(palavra in message_text for palavra in GATILHOS_BOT)
-    
-    if eh_gatilho:
-        # Localiza a etapa inicial do funil
-        stage = CRMStage.query.filter_by(clinic_id=clinic_id, is_initial=True).first()
+        if not existing_card:
+            # Localiza a etapa inicial do funil ('Novo Lead')
+            stage = CRMStage.query.filter_by(clinic_id=clinic_id, is_initial=True).first()
             
-        if stage:
+            if stage:
+                try:
+                    # Cria o Lead na tabela de marketing
+                    novo_lead = Lead(
+                        clinic_id=clinic_id,
+                        campaign_id=campaign.id,
+                        name=push_name,
+                        phone=phone,
+                        source=f"Campanha: {campaign.name}",
+                        status='novo'
+                    )
+                    db.session.add(novo_lead)
+                    
+                    # Cria o Card no CRM (Organização Visual)
+                    novo_card = CRMCard(
+                        clinic_id=clinic_id,
+                        stage_id=stage.id,
+                        paciente_nome=push_name, # pushName do WhatsApp
+                        paciente_phone=phone,
+                        historico_conversas=f"Lead da Campanha '{campaign.name}': {message_text}",
+                        valor_proposta=0,
+                        status='open'
+                    )
+                    db.session.add(novo_card)
+                    
+                    # Incrementa contador de leads da campanha
+                    campaign.leads_count += 1
+                    
+                    # Registra evento de conversão
+                    event = LeadEvent(
+                        campaign_id=campaign.id,
+                        event_type='msg_in',
+                        metadata_json={'phone': phone, 'push_name': push_name, 'message': message_text}
+                    )
+                    db.session.add(event)
+                    
+                    db.session.commit()
+                    logger.info(f"🚀 Automação Silenciosa: Lead '{push_name}' convertido e adicionado ao CRM da Clínica {clinic_id}.")
+                except Exception as e:
+                    logger.error(f"❌ Erro na conversão automática: {e}")
+                    db.session.rollback()
+        else:
+            # Se já existe card, apenas registra o evento se for de campanha
             try:
-                novo_card = CRMCard(
-                    clinic_id=clinic_id,
-                    stage_id=stage.id,
-                    paciente_nome=push_name,
-                    paciente_phone=phone,
-                    historico_conversas=f"WhatsApp: {message_text}",
-                    valor_proposta=0,
-                    status='open'
+                event = LeadEvent(
+                    campaign_id=campaign.id,
+                    event_type='msg_in',
+                    metadata_json={'phone': phone, 'message': message_text, 'note': 'already_in_crm'}
                 )
-                db.session.add(novo_card)
+                db.session.add(event)
                 db.session.commit()
-                logger.info(f"✅ Lead '{push_name}' adicionado ao Funil de Recuperação da Clínica {clinic_id}.")
-            except Exception as e:
-                logger.error(f"❌ Erro ao salvar Lead: {e}")
+            except:
                 db.session.rollback()
 
     return jsonify({"status": "processed"}), 200
