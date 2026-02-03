@@ -47,11 +47,14 @@ def create_campaign():
     db.session.commit()
     
     base_url = request.host_url.rstrip('/')
+    # CORREÇÃO: Adicionado /api/marketing para bater na rota certa
+    full_tracking_url = f"{base_url}/api/marketing/c/{code}"
+    
     return jsonify({
         "id": new_campaign.id,
         "name": new_campaign.name,
         "tracking_code": code,
-        "tracking_url": f"{base_url}/c/{code}",
+        "tracking_url": full_tracking_url,
         "active": True,
         "clicks": 0, 
         "leads": 0
@@ -70,7 +73,8 @@ def list_campaigns():
         "id": c.id,
         "name": c.name,
         "tracking_code": c.tracking_code,
-        "tracking_url": f"{base_url}/c/{c.tracking_code}",
+        # CORREÇÃO: Adicionado /api/marketing
+        "tracking_url": f"{base_url}/api/marketing/c/{c.tracking_code}",
         "active": c.active,
         "clicks": c.clicks_count,
         "leads": c.leads_count,
@@ -116,7 +120,7 @@ def track_click_and_redirect(code):
     # Busca campanha
     campaign = Campaign.query.filter_by(tracking_code=code).first()
     
-    # 🔴 SE NÃO EXISTE: Joga para o Google (Isso mata o carregamento do React)
+    # 🔴 SE NÃO EXISTE: Joga para o Google
     if not campaign:
         return redirect("https://www.google.com/search?q=Erro+Link+Nao+Encontrado+SistemaOdonto")
 
@@ -186,7 +190,8 @@ def track_click_and_redirect(code):
 def get_qr_code(campaign_id):
     camp = Campaign.query.get_or_404(campaign_id)
     base_url = request.host_url.rstrip('/')
-    link = f"{base_url}/c/{camp.tracking_code}"
+    # CORREÇÃO: Adicionado /api/marketing
+    link = f"{base_url}/api/marketing/c/{camp.tracking_code}"
     
     qr = qrcode.QRCode(version=1, box_size=10, border=5)
     qr.add_data(link)
