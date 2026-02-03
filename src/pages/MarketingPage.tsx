@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Trash2, PauseCircle, PlayCircle, Copy } from 'lucide-react';
 
 // --- TIPAGEM ---
 interface AutomationRule {
@@ -18,6 +19,7 @@ interface Campaign {
   qr_code_url: string;
   clicks: number;
   leads: number;
+  active: boolean; // ✅ Adicionado campo active
 }
 
 interface CRMCard {
@@ -74,8 +76,7 @@ const MarketingPage: React.FC = () => {
       const resRules = await fetch(`${API_URL}/automations`, { headers });
       if (resRules.ok) setRules(await resRules.json());
 
-      // 2. Campanhas (Tenta buscar se o endpoint GET existir, senão ignora)
-      // Nota: Você precisará criar o endpoint GET /campaigns no backend para listar na tela
+      // 2. Campanhas
       try {
         const resCamp = await fetch(`${API_URL}/campaigns`, { headers });
         if (resCamp.ok) setCampaigns(await resCamp.json());
@@ -122,7 +123,7 @@ const MarketingPage: React.FC = () => {
     fetchData();
   };
 
-  // --- HANDLERS CAMPANHA ---
+  // --- HANDLERS CAMPANHA (ATUALIZADOS) ---
   const handleSaveCampaign = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -133,16 +134,37 @@ const MarketingPage: React.FC = () => {
       });
       
       if(res.ok) {
-        // Se o backend retornar a campanha criada, adicionamos manualmente para feedback imediato
-        const newCamp = await res.json();
-        setCampaigns(prev => [newCamp, ...prev]); 
+        fetchData(); // Recarrega tudo para garantir ID correto
       }
       
       setIsCampaignModalOpen(false);
       setCampaignForm({ name: '', message: 'Olá! Vi a promoção... [ref:TOKEN]' });
       alert('Campanha criada! Link gerado.');
-      fetchData(); // Tenta recarregar
     } catch (error) { window.alert('Erro ao criar campanha'); }
+  };
+
+  // ✅ Função para EXCLUIR Campanha
+  const handleDeleteCampaign = async (id: number) => {
+    if (!window.confirm('Tem certeza? Isso vai excluir a campanha e o link deixará de funcionar.')) return;
+    try {
+        await fetch(`${API_URL}/campaigns/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        fetchData();
+    } catch (error) { alert('Erro ao excluir'); }
+  };
+
+  // ✅ Função para PAUSAR/RETOMAR Campanha
+  const handleToggleCampaign = async (id: number, currentStatus: boolean) => {
+    try {
+        await fetch(`${API_URL}/campaigns/${id}/status`, { 
+          method: 'PATCH', 
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, 
+          body: JSON.stringify({ active: !currentStatus }) 
+        });
+        fetchData();
+    } catch (error) { alert('Erro ao alterar status'); }
   };
 
   const copyLink = (text: string) => {
@@ -193,7 +215,7 @@ const MarketingPage: React.FC = () => {
             {rules.length === 0 && <p className="text-gray-400 col-span-3 text-center py-8 bg-white rounded border border-dashed">Nenhuma regra de automação criada.</p>}
             {rules.map(rule => (
               <div key={rule.id} className="bg-white p-4 rounded-lg shadow border relative group hover:shadow-md transition">
-                 <button onClick={() => handleDeleteRule(rule.id)} className="absolute top-2 right-2 text-gray-300 hover:text-red-500">🗑️</button>
+                 <button onClick={() => handleDeleteRule(rule.id)} className="absolute top-2 right-2 text-gray-300 hover:text-red-500"><Trash2 size={16}/></button>
                  <h3 className="font-bold text-blue-600">{rule.nome}</h3>
                  <p className="text-sm text-gray-600">🕒 {rule.horario} | 📅 {rule.dias_ausente} dias ausente</p>
                  <div className="mt-2 text-xs bg-gray-50 p-2 rounded text-gray-700 italic border border-gray-100">"{rule.mensagem}"</div>
@@ -203,7 +225,7 @@ const MarketingPage: React.FC = () => {
         </div>
       )}
 
-      {/* CONTEÚDO DA ABA: CAMPANHAS */}
+      {/* CONTEÚDO DA ABA: CAMPANHAS (EDITADO PARA INCLUIR AÇÕES) */}
       {activeTab === 'campaigns' && (
         <div className="mb-10 animate-fade-in">
           <div className="flex justify-between items-center mb-4">
@@ -214,17 +236,48 @@ const MarketingPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {campaigns.length === 0 && <p className="text-gray-400 col-span-3 text-center py-8 bg-white rounded border border-dashed">Nenhuma campanha criada. Crie uma para gerar links rastreáveis.</p>}
             {campaigns.map(camp => (
-              <div key={camp.id} className="bg-white p-4 rounded-lg shadow border border-green-50 relative group hover:shadow-md transition">
+              <div key={camp.id} className={`bg-white p-4 rounded-lg shadow border border-green-50 relative group hover:shadow-md transition ${!camp.active ? 'opacity-75 grayscale' : ''}`}>
+                 
+                 {/* HEADER DO CARD COM AÇÕES */}
                  <div className="flex justify-between items-start mb-3">
-                    <h3 className="font-bold text-green-700">{camp.name}</h3>
-                    <img src={camp.qr_code_url} alt="QR" className="w-12 h-12 border rounded p-1" />
+                    <div>
+                        <h3 className="font-bold text-green-700">{camp.name}</h3>
+                        {!camp.active && <span className="text-[10px] bg-gray-200 text-gray-600 px-1 rounded uppercase font-bold">Pausada</span>}
+                    </div>
+                    
+                    <div className="flex items-center gap-2">
+                        {/* Botão Pausar/Play */}
+                        <button 
+                            onClick={() => handleToggleCampaign(camp.id, camp.active)}
+                            className={`p-1 rounded hover:bg-gray-100 ${camp.active ? 'text-yellow-500' : 'text-green-500'}`}
+                            title={camp.active ? "Pausar" : "Ativar"}
+                        >
+                            {camp.active ? <PauseCircle size={18}/> : <PlayCircle size={18}/>}
+                        </button>
+                        
+                        {/* Botão Excluir */}
+                        <button 
+                            onClick={() => handleDeleteCampaign(camp.id)}
+                            className="p-1 rounded text-gray-300 hover:text-red-500 hover:bg-red-50"
+                            title="Excluir"
+                        >
+                            <Trash2 size={18}/>
+                        </button>
+                        
+                        {/* QR Code Miniatura */}
+                        <img src={camp.qr_code_url} alt="QR" className="w-10 h-10 border rounded p-1 ml-1" />
+                    </div>
                  </div>
                  
+                 {/* LINK E COPY */}
                  <div className="bg-gray-50 rounded p-2 mb-3 flex items-center justify-between border">
-                    <span className="text-xs text-gray-600 truncate max-w-[180px]">{camp.tracking_url}</span>
-                    <button onClick={() => copyLink(camp.tracking_url)} className="text-xs bg-white border px-2 py-1 rounded font-bold hover:bg-gray-100">Copiar</button>
+                    <span className="text-xs text-gray-600 truncate max-w-[150px]">{camp.tracking_url}</span>
+                    <button onClick={() => copyLink(camp.tracking_url)} className="text-xs bg-white border px-2 py-1 rounded font-bold hover:bg-gray-100 flex items-center gap-1">
+                        <Copy size={12}/> Copiar
+                    </button>
                  </div>
 
+                 {/* MÉTRICAS */}
                  <div className="flex gap-4 text-xs text-gray-500 border-t pt-2">
                     <div className="text-center flex-1">
                       <strong className="block text-lg text-gray-800">{camp.clicks || 0}</strong> Cliques
