@@ -39,6 +39,10 @@ def enviar_whatsapp_interno(clinic_id, telefone, mensagem):
     # Limpa o telefone (apenas números)
     phone_number = ''.join(filter(str.isdigit, telefone))
     
+    # Se não tiver 55 no começo, adiciona (Melhor prevenir)
+    if len(phone_number) == 11 and not phone_number.startswith("55"):
+        phone_number = "55" + phone_number
+
     url = f"{EVOLUTION_API_URL}/message/sendText/{instance_name}"
     payload = {
         "number": phone_number,
@@ -70,16 +74,11 @@ def processar_automacoes():
         logger.info(f"⏰ Scheduler rodando: Verificando regras para {hora_atual}...")
 
         # 2. Busca automações ativas agendadas para esta hora
-        # Nota: Ajustamos para buscar horário exato ou aproximado se necessário
         regras = AutomacaoRecall.query.filter_by(ativo=True).all()
-
-        count_envios = 0
 
         for regra in regras:
             # Verifica se o horário bate (filtro simples python para garantir formato)
-            # Se no banco estiver "09:00" e agora for "09:00", ele entra.
             if regra.horario_disparo and regra.horario_disparo.startswith(hora_atual[:2]):
-                
                 logger.info(f"🚀 Executando regra '{regra.nome}' da Clínica {regra.clinic_id}")
                 executar_regra_especifica(regra)
 
@@ -87,15 +86,25 @@ def executar_regra_especifica(regra):
     # Data limite: Hoje - Dias configurados (Ex: Hoje - 180 dias)
     data_corte = datetime.utcnow() - timedelta(days=regra.dias_ausente)
     
+    # === [OPCIONAL] LISTA VIP DE TESTE (Descomente para testar só com seu número) ===
+    # WHITELIST_NUMBERS = ["5521999999999"] 
+    WHITELIST_NUMBERS = [] # Deixe vazia para rodar com todos os pacientes do banco
+
     # 1. Buscar Pacientes que sumiram (última visita antes da data de corte)
     pacientes_candidatos = Patient.query.filter(
         Patient.clinic_id == regra.clinic_id,
         Patient.last_visit < data_corte,
-        Patient.status == 'ativo'  # Não manda para inativos
+        Patient.status == 'ativo',
+        Patient.receive_marketing == True  # <--- [NOVO] Só quem aceita marketing
     ).all()
 
     for paciente in pacientes_candidatos:
         try:
+            # --- TRAVA DE SEGURANÇA: MODO TESTE ---
+            if len(WHITELIST_NUMBERS) > 0 and paciente.phone not in WHITELIST_NUMBERS:
+                logger.info(f"🛡️ Pulei {paciente.name} pois não está na WhiteList de teste.")
+                continue 
+
             # --- FILTRO 1: SEGURANÇA (Já tem consulta marcada?) ---
             tem_agendamento = Appointment.query.filter(
                 Appointment.clinic_id == regra.clinic_id,
@@ -121,10 +130,7 @@ def executar_regra_especifica(regra):
             # === AÇÃO: DISPARAR RECALL ===
             
             # 1. Prepara a mensagem
-            if not regra.mensagem_template:
-                msg_final = f"Olá {paciente.name}, faz tempo que não te vemos! Vamos agendar um checkup?"
-            else:
-                msg_final = regra.mensagem_template.replace("{nome}", paciente.name)
+            msg_final = regra.mensagem_template.replace("{nome}", paciente.name) if regra.mensagem_template else f"Olá {paciente.name}, faz tempo que não te vemos! Vamos agendar um checkup?"
 
             # 2. Envia WhatsApp
             sucesso, log_msg = enviar_whatsapp_interno(regra.clinic_id, paciente.phone, msg_final)
@@ -134,12 +140,9 @@ def executar_regra_especifica(regra):
                 
                 # 3. CRIA CARD NO CRM (KANBAN)
                 # Busca a coluna inicial (Ex: "A Contactar")
-                estagio_inicial = CRMStage.query.filter_by(
-                    clinic_id=regra.clinic_id, 
-                    is_initial=True
-                ).first()
+                estagio_inicial = CRMStage.query.filter_by(clinic_id=regra.clinic_id, is_initial=True).first()
 
-                # Se não tiver estágio configurado, pega o primeiro que achar ou cria um dummy (segurança)
+                # Fallback: Se não tiver estágio, pega o primeiro
                 if not estagio_inicial:
                     estagio_inicial = CRMStage.query.filter_by(clinic_id=regra.clinic_id).order_by(CRMStage.ordem).first()
 
@@ -152,7 +155,7 @@ def executar_regra_especifica(regra):
                         status='open'
                     )
                     db.session.add(novo_card)
-                    db.session.flush() # Para gerar o ID do card
+                    db.session.flush()
 
                     # 4. REGISTRA HISTÓRICO
                     hist = CRMHistory(
@@ -168,20 +171,14 @@ def executar_regra_especifica(regra):
 
         except Exception as e:
             logger.error(f"Erro ao processar paciente {paciente.id}: {e}")
-            db.session.rollback() # Garante que não trava o loop
+            db.session.rollback()
 
 # ==============================================================================
 # INICIALIZADOR
 # ==============================================================================
 def start_scheduler():
     scheduler = BackgroundScheduler()
-    
-    # Adiciona o Job para rodar a cada 1 hora (ou use cron para horários fixos)
-    # Ex: minutes=30 roda a cada 30 min. 'hours=1' roda de hora em hora.
+    # Roda de hora em hora
     scheduler.add_job(processar_automacoes, 'interval', minutes=60)
-    
-    # Opcional: Rodar uma vez assim que ligar para teste (comente em produção)
-    # scheduler.add_job(processar_automacoes, 'date', run_date=datetime.now() + timedelta(seconds=10))
-
     scheduler.start()
     logger.info("🚀 Scheduler de Recall Iniciado com Sucesso!")

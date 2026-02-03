@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Loader2, ShieldAlert } from 'lucide-react';
 
-// --- IMPORTAÇÕES DE PÁGINAS (Garanta que todas usam "export function Nome()") ---
+// --- IMPORTAÇÕES DE PÁGINAS ---
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 
@@ -19,9 +19,9 @@ import { AtendeChat } from './pages/AtendeChat';
 import { Configuracoes } from './pages/Configuracoes';
 import { LandingPage } from './pages/LandingPage';
 
-// ✅ NOVO: Página do módulo WhatsApp
+// Módulos de Marketing
 import { WhatsAppModulePage } from './pages/WhatsAppModulePage';
-
+import MarketingPage from './pages/MarketingPage'; // ✅ [NOVO] Importação da página de Recall
 
 // --- COMPONENTE DE BLOQUEIO (UI INDUSTRIAL) ---
 const BloqueioPagamento = () => (
@@ -47,6 +47,7 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     if (token) {
+      // Ajuste a URL se necessário (ex: http://localhost:5000/auth/status)
       fetch('/auth/status', {
         headers: { 'Authorization': `Bearer ${token}` }
       })
@@ -57,7 +58,6 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
       .then(data => setIsActive(data.is_active))
       .catch((err) => {
         console.error("Erro no Status:", err);
-        // Fallback para evitar bloqueio indevido durante resets
         setIsActive(true); 
       })
       .finally(() => setChecking(false));
@@ -87,7 +87,7 @@ function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
 
-        {/* EXCEÇÃO PARA APIS: Evita que o React capture rotas do Flask */}
+        {/* EXCEÇÃO PARA APIS */}
         <Route path="/api/*" element={null} />
         <Route path="/auth/*" element={null} />
         
@@ -108,11 +108,13 @@ function App() {
                   <Route path="/estoque" element={<Estoque />} />
                   
                   <Route path="/gestao-equipe" element={<GestaoEquipe />} />
-
                   <Route path="/atende-chat" element={<AtendeChat />} />
 
-                  {/* ✅ NOVO: WhatsApp */}
+                  {/* Módulo WhatsApp (Conexão e Chat Manual) */}
                   <Route path="/whatsapp" element={<WhatsAppModulePage />} />
+
+                  {/* ✅ [NOVO] Módulo Marketing (Recall Automático & CRM) */}
+                  <Route path="/marketing" element={<MarketingPage />} />
 
                   <Route path="/configuracoes" element={<Configuracoes />} />
                   

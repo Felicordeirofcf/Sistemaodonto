@@ -5,7 +5,7 @@ import {
   DollarSign, Package, MessageSquare, 
   LogOut, ShieldCheck,
   Settings, Sparkles,
-  MessageCircle
+  MessageCircle, Megaphone // ✅ Importado o ícone de Megaphone
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -40,12 +40,14 @@ export function Sidebar() {
   const adminItems: MenuItem[] = [
     { title: 'Financeiro', icon: DollarSign, path: '/app/financeiro' },
     { title: 'Estoque', icon: Package, path: '/app/estoque' },
-    // Rota unificada com App.tsx
     { title: 'Gestão da Equipe', icon: ShieldCheck, path: '/app/gestao-equipe' },
     { title: 'AtendeChat IA', icon: MessageSquare, path: '/app/atende-chat' },
 
-    // ✅ NOVO: WhatsApp (módulo)
+    // ✅ WhatsApp (Módulo de Chat)
     { title: 'WhatsApp', icon: MessageCircle, path: '/app/whatsapp' },
+
+    // ✅ [NOVO] Marketing & CRM (Automação de Recall)
+    { title: 'Marketing & CRM', icon: Megaphone, path: '/app/marketing' },
 
     { title: 'Configurações', icon: Settings, path: '/app/configuracoes' },
   ];
@@ -74,8 +76,8 @@ export function Sidebar() {
                 to={item.path}
                 className={`flex items-center gap-3 px-5 py-4 rounded-[1.25rem] transition-all group ${
                   isActive 
-                    ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20' 
-                    : 'text-slate-500 hover:bg-slate-900 hover:text-white'
+                  ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20' 
+                  : 'text-slate-500 hover:bg-slate-900 hover:text-white'
                 }`}
               >
                 <item.icon size={20} className={isActive ? 'text-white' : 'group-hover:text-blue-400'} />

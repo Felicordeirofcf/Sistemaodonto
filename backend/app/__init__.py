@@ -49,7 +49,7 @@ def create_app():
 
     # 3. CONTEXTO DA APLICAÇÃO
     with app.app_context():
-        # IMPORTAÇÃO DOS MODELS (Aqui dentro para garantir que o app context existe)
+        # IMPORTAÇÃO DOS MODELS
         from .models import (
             Clinic, User, Patient, InventoryItem, Appointment, Transaction,
             WhatsAppConnection, WhatsAppContact, MessageLog, ScheduledMessage,
@@ -94,6 +94,10 @@ def create_app():
     from .routes.marketing.whatsapp import bp as marketing_whatsapp_bp
     app.register_blueprint(marketing_whatsapp_bp, url_prefix="/api/marketing")
 
+    # ✅ [NOVO] Automações e Regras (Adicionado Aqui)
+    from .routes.marketing.automations import bp as automations_bp
+    app.register_blueprint(automations_bp, url_prefix="/api/marketing")
+
     # --- ROTAS DE SISTEMA (RESET E SEED) ---
     @app.route("/api/force_reset_db")
     def force_reset():
@@ -117,7 +121,7 @@ def create_app():
     def seed_db_web():
         from werkzeug.security import generate_password_hash
         from datetime import datetime, timedelta
-        from .models import Clinic, User, Patient # Import local para garantir
+        from .models import Clinic, User, Patient
 
         try:
             db.create_all()
@@ -144,7 +148,7 @@ def create_app():
 
                 p1 = Patient(
                     name="Carlos Eduardo",
-                    phone="5521999999999", # Exemplo com DDI
+                    phone="5521999999999", 
                     last_visit=datetime.utcnow() - timedelta(days=240),
                     clinic_id=demo_clinic.id,
                 )
