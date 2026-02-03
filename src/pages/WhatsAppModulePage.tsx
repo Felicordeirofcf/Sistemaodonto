@@ -24,11 +24,6 @@ export function WhatsAppModulePage() {
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<ApiResult | null>(null);
 
-  const [recallDays, setRecallDays] = useState(30);
-  const [recallHour, setRecallHour] = useState("09:00");
-  const [savingRecall, setSavingRecall] = useState(false);
-  const [recallSaved, setRecallSaved] = useState<string | null>(null);
-
   function getHeaders() {
     const token = localStorage.getItem("odonto_token");
     return {
@@ -90,24 +85,6 @@ export function WhatsAppModulePage() {
     }
   }
 
-  async function saveRecallConfig() {
-    setSavingRecall(true);
-    setRecallSaved(null);
-    try {
-      const res = await fetch(API("/api/marketing/whatsapp/recall/config"), {
-        method: "POST",
-        headers: getHeaders(),
-        body: JSON.stringify({ days: recallDays, hour: recallHour }),
-      });
-      const data = await res.json().catch(() => ({}));
-      setRecallSaved(res.ok && data?.ok ? "Configuração salva ✅" : data?.message || "Erro ao salvar");
-    } catch {
-      setRecallSaved("Erro ao salvar");
-    } finally {
-      setSavingRecall(false);
-    }
-  }
-
   useEffect(() => {
     fetchQR();
     // Atualizado para 5 segundos (Backend tem cache agora, então é seguro e mais rápido)
@@ -121,9 +98,9 @@ export function WhatsAppModulePage() {
         {/* CABEÇALHO */}
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold tracking-wide">WhatsApp</h1>
+            <h1 className="text-xl font-semibold tracking-wide">Conexão WhatsApp</h1>
             <p className="text-sm text-slate-400">
-              Gerenciamento de conexão e disparos automáticos.
+              Gerencie a conexão do seu número com o sistema.
             </p>
           </div>
 
@@ -266,57 +243,23 @@ export function WhatsAppModulePage() {
                 <div className={`mt-3 flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg ${
                   sendResult.ok ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
                 }`}>
-                   {sendResult.ok ? "✅ Mensagem enviada com sucesso!" : `❌ Erro: ${sendResult.message}`}
+                    {sendResult.ok ? "✅ Mensagem enviada com sucesso!" : `❌ Erro: ${sendResult.message}`}
                 </div>
               )}
             </div>
 
-            {/* CARTÃO 3: RECALL */}
-            <div className="rounded-2xl border border-slate-800 bg-[#0B1220] p-5 flex-1">
-              <h2 className="text-base font-semibold flex items-center gap-2">
-                <RefreshCcw size={18} className="text-purple-400" />
-                Recall automático (Reativação)
-              </h2>
-              <p className="mt-1 text-xs text-slate-400">Configure quando o sistema deve tentar reativar pacientes sumidos.</p>
-
-              <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-6 items-end">
-                <div className="lg:col-span-2">
-                  <label className="text-xs font-medium text-slate-400 ml-1">Dias sem interação</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={365}
-                    value={recallDays}
-                    onChange={(e) => setRecallDays(Number(e.target.value))}
-                    className="mt-1 w-full rounded-xl border border-slate-800 bg-[#070B14] px-3 py-2.5 text-sm outline-none focus:border-purple-500 transition-all"
-                  />
-                </div>
-
-                <div className="lg:col-span-2">
-                  <label className="text-xs font-medium text-slate-400 ml-1">Horário de disparo</label>
-                  <input
-                    type="time"
-                    value={recallHour}
-                    onChange={(e) => setRecallHour(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-800 bg-[#070B14] px-3 py-2.5 text-sm outline-none focus:border-purple-500 transition-all"
-                  />
-                </div>
-
-                <div className="lg:col-span-2">
-                  <button
-                    onClick={saveRecallConfig}
-                    disabled={savingRecall}
-                    className="w-full rounded-xl bg-[#1C2B4A] px-4 py-2.5 text-sm font-medium hover:bg-[#24365B] disabled:opacity-60 transition-colors text-purple-200"
-                  >
-                    {savingRecall ? "Salvando..." : "Salvar Configuração"}
-                  </button>
-                </div>
-              </div>
-               {recallSaved && (
-                <p className="mt-3 text-xs text-center text-slate-400 animate-pulse">
-                  {recallSaved}
-                </p>
-              )}
+            {/* DICA PRO USUÁRIO */}
+            <div className="rounded-2xl border border-slate-800 bg-[#0B1220]/50 p-5 flex items-center gap-4">
+               <div className="h-10 w-10 rounded-full bg-purple-500/10 flex items-center justify-center text-purple-400">
+                  <RefreshCcw size={20} />
+               </div>
+               <div>
+                  <h3 className="text-sm font-semibold text-slate-200">Procurando as Automações?</h3>
+                  <p className="text-xs text-slate-400">
+                     A configuração de robôs de recall e campanhas agora fica na aba 
+                     <strong className="text-purple-300"> Marketing & CRM</strong>.
+                  </p>
+               </div>
             </div>
 
           </div>
