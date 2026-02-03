@@ -109,18 +109,29 @@ def delete_campaign(id):
         return jsonify({"error": str(e)}), 500
 
 # ==============================================================================
-# 2. ROTA DE RASTREAMENTO (CORRIGIDA - SEM ERRO DE ATTRIBUTO)
+# 2. ROTA DE RASTREAMENTO INTELIGENTE
 # ==============================================================================
 @bp.route('/c/<code>', methods=['GET'])
 def track_click_and_redirect(code):
     # Busca campanha
     campaign = Campaign.query.filter_by(tracking_code=code).first()
     
+    # ✅ MUDANÇA: Retorna status 200 com HTML para evitar que o frontend React carregue a tela de login
     if not campaign:
-        return "<h1 style='font-family:sans-serif;text-align:center;margin-top:50px;'>⚠️ Link Inválido</h1>", 404
+        return """
+        <div style="font-family:sans-serif; text-align:center; padding:50px; color:#333;">
+            <h1 style="color:#e11d48; font-size:24px;">⚠️ Link não encontrado</h1>
+            <p>Esta campanha não existe mais ou o link está incorreto.</p>
+        </div>
+        """, 200
 
     if not campaign.active:
-        return "<h1 style='font-family:sans-serif;text-align:center;margin-top:50px;'>⏸️ Campanha Pausada</h1>", 200
+        return """
+        <div style="font-family:sans-serif; text-align:center; padding:50px; color:#333;">
+            <h1 style="color:#f59e0b; font-size:24px;">⏸️ Campanha Pausada</h1>
+            <p>Este link está temporariamente indisponível.</p>
+        </div>
+        """, 200
     
     # 1. Registra o Clique
     try:
@@ -135,7 +146,7 @@ def track_click_and_redirect(code):
     except Exception as e:
         print(f"Erro métrica: {e}")
 
-    # 2. Descobre o Número (SEM USAR instance_name DO BANCO)
+    # 2. Descobre o Número (Lógica SaaS - Busca qualquer instância ativa)
     target_phone = None
     
     # A) Tenta cache do banco (se já tiver salvo o numero)
@@ -171,12 +182,12 @@ def track_click_and_redirect(code):
         except Exception as e:
             print(f"❌ Erro ao consultar Evolution: {e}")
 
-    # C) Fallback de Emergência (Evita tela de erro 500)
+    # C) Fallback de Emergência
     if not target_phone:
          return """
         <div style="font-family:sans-serif; text-align:center; padding:50px;">
             <h1>⚠️ WhatsApp Não Conectado</h1>
-            <p>O sistema não conseguiu identificar o número da clínica.</p>
+            <p>O sistema não conseguiu identificar o número da clínica automaticamente.</p>
             <p>Verifique se o QR Code está lido na aba WhatsApp.</p>
         </div>
         """, 503
