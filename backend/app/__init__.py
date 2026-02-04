@@ -16,6 +16,7 @@ db = SQLAlchemy()
 migrate = Migrate()
 jwt = JWTManager()
 
+
 def create_app():
     app = Flask(__name__, static_folder="static", static_url_path="")
 
@@ -67,9 +68,7 @@ def create_app():
         except Exception as e:
             logger.warning(f"⚠️ Aviso ao verificar banco: {e}")
 
-        # ✅ Hotfix de schema para Postgres em produção (Render):
-        # create_all() NÃO altera tabelas já existentes. Se você adicionou colunas no model,
-        # o Postgres fica sem elas e o sistema quebra (ex: clinics.ai_enabled).
+        # ✅ Hotfix de schema para Postgres em produção (Render)
         try:
             if db.engine.dialect.name == "postgresql":
                 schema_fixes = [
@@ -132,6 +131,11 @@ def create_app():
     from .routes.team_routes import team_bp
     app.register_blueprint(team_bp, url_prefix="/api")
 
+    # ✅ Evolution Functions (para o Evolution salvar o OpenAI Bot)
+    # IMPORT RELATIVO CORRETO + INDENTAÇÃO CORRETA
+    from .routes.evolution_routes import evolution_bp
+    app.register_blueprint(evolution_bp, url_prefix="/api")
+
     # ✅ WhatsApp e Marketing (Core)
     from .routes.marketing.whatsapp import bp as marketing_whatsapp_bp
     app.register_blueprint(marketing_whatsapp_bp, url_prefix="/api/marketing")
@@ -140,18 +144,16 @@ def create_app():
     from .routes.marketing.automations import bp as automations_bp
     app.register_blueprint(automations_bp, url_prefix="/api/marketing")
 
-    # ✅ [NOVO] Configurações de IA (ChatGPT) por clínica
+    # ✅ Configurações de IA (ChatGPT) por clínica
     from .routes.marketing.ai_settings import bp as marketing_ai_bp
     app.register_blueprint(marketing_ai_bp, url_prefix="/api/marketing")
 
     # ✅ Campanhas e Leads (Gestão + Links Públicos)
     from .routes.marketing.campaigns import bp as campaigns_bp
-    # 1. Registra para API de gestão (ex: /api/marketing/campaigns)
     app.register_blueprint(campaigns_bp, url_prefix="/api/marketing")
-    # 2. Registra na RAIZ para o link curto funcionar (ex: /c/xyz12)
     app.register_blueprint(campaigns_bp, name="campaigns_public", url_prefix="")
 
-    # ✅ [NOVO] Webhook do WhatsApp (Adicione ISTO para o bot responder)
+    # ✅ Webhook do WhatsApp (bot responder)
     from .routes.marketing.webhook import bp as webhook_bp
     app.register_blueprint(webhook_bp, url_prefix="/api/marketing")
 
@@ -163,9 +165,7 @@ def create_app():
             return jsonify({"error": "Confirmação necessária (?confirm=true)"}), 403
 
         try:
-            from sqlalchemy import text
             db.session.remove()
-            # Cuidado: Só funciona bem em Postgres
             db.session.execute(text("DROP SCHEMA public CASCADE; CREATE SCHEMA public;"))
             db.session.commit()
             db.create_all()
@@ -205,7 +205,7 @@ def create_app():
 
                 p1 = Patient(
                     name="Carlos Eduardo",
-                    phone="5521999999999", 
+                    phone="5521999999999",
                     last_visit=datetime.utcnow() - timedelta(days=240),
                     clinic_id=demo_clinic.id,
                 )
@@ -224,8 +224,6 @@ def create_app():
     @app.route("/api/fix_tables")
     def fix_tables():
         try:
-            from sqlalchemy import text
-            
             # 1. Cria tabela AutomacaoRecall
             sql_recall = text("""
                 CREATE TABLE IF NOT EXISTS automacoes_recall (
@@ -238,7 +236,7 @@ def create_app():
                     ativo BOOLEAN DEFAULT TRUE
                 );
             """)
-            
+
             # 2. Cria tabela CRMStage
             sql_stage = text("""
                 CREATE TABLE IF NOT EXISTS crm_stages (
@@ -269,37 +267,36 @@ def create_app():
                 ALTER TABLE patients ADD COLUMN IF NOT EXISTS receive_marketing BOOLEAN DEFAULT TRUE;
             """)
 
-            # 4.1) ✅ Campos de IA (ChatGPT) por clínica
-            # (Postgres: ADD COLUMN IF NOT EXISTS funciona; se a coluna já existir, ignora)
+            # 4.1) Campos de IA (ChatGPT) por clínica
             sql_clinic_ai = text("""
                 ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_enabled BOOLEAN DEFAULT TRUE;
                 ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_model VARCHAR(50) DEFAULT 'gpt-4o-mini';
                 ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_temperature FLOAT DEFAULT 0.4;
                 ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_system_prompt TEXT;
-                ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_procedures JSON;
+                ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_procedures JSONB;
+                ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_booking_policy TEXT;
             """)
 
-            # 5. [NOVO] Tabelas de Marketing (Campanhas, Leads, Eventos)
+            # 5. Tabelas de Marketing (Campanhas, Leads, Eventos)
             sql_marketing = text("""
                 CREATE TABLE IF NOT EXISTS marketing_campaigns (
-                    id SERIAL PRIMARY KEY, clinic_id INTEGER NOT NULL, name VARCHAR(100), slug VARCHAR(50), 
-                    tracking_code VARCHAR(20), whatsapp_message_template TEXT, landing_page_data JSON, 
-                    clicks_count INTEGER DEFAULT 0, leads_count INTEGER DEFAULT 0, active BOOLEAN DEFAULT TRUE, 
+                    id SERIAL PRIMARY KEY, clinic_id INTEGER NOT NULL, name VARCHAR(100), slug VARCHAR(50),
+                    tracking_code VARCHAR(20), whatsapp_message_template TEXT, landing_page_data JSON,
+                    clicks_count INTEGER DEFAULT 0, leads_count INTEGER DEFAULT 0, active BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
                 );
                 CREATE TABLE IF NOT EXISTS marketing_leads (
-                    id SERIAL PRIMARY KEY, clinic_id INTEGER NOT NULL, campaign_id INTEGER, name VARCHAR(100), 
-                    phone VARCHAR(30), status VARCHAR(20) DEFAULT 'novo', source VARCHAR(50), 
-                    chatbot_state VARCHAR(50) DEFAULT 'START', chatbot_data JSON DEFAULT '{}', 
+                    id SERIAL PRIMARY KEY, clinic_id INTEGER NOT NULL, campaign_id INTEGER, name VARCHAR(100),
+                    phone VARCHAR(30), status VARCHAR(20) DEFAULT 'novo', source VARCHAR(50),
+                    chatbot_state VARCHAR(50) DEFAULT 'START', chatbot_data JSON DEFAULT '{}',
                     created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(), updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
                     is_deleted BOOLEAN DEFAULT FALSE, deleted_at TIMESTAMP WITHOUT TIME ZONE
                 );
-                -- Garantir que as colunas existam caso a tabela já tenha sido criada
                 ALTER TABLE marketing_leads ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;
                 ALTER TABLE marketing_leads ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITHOUT TIME ZONE;
                 CREATE INDEX IF NOT EXISTS idx_leads_clinic_deleted ON marketing_leads (clinic_id, is_deleted);
                 CREATE TABLE IF NOT EXISTS marketing_lead_events (
-                    id SERIAL PRIMARY KEY, lead_id INTEGER, campaign_id INTEGER, event_type VARCHAR(50), 
+                    id SERIAL PRIMARY KEY, lead_id INTEGER, campaign_id INTEGER, event_type VARCHAR(50),
                     metadata_json JSON, created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
                 );
             """)
@@ -309,46 +306,40 @@ def create_app():
             db.session.execute(sql_card)
             db.session.execute(sql_coluna)
             db.session.execute(sql_clinic_ai)
-            db.session.execute(sql_marketing) # Executa as novas
+            db.session.execute(sql_marketing)
             db.session.commit()
-            
+
             return jsonify({"message": "Tabelas recriadas via SQL com sucesso!"}), 200
         except Exception as e:
             db.session.rollback()
             return jsonify({"error": str(e)}), 500
 
     # --- HANDLER GLOBAL DE ERROS (JSON) ---
-    from werkzeug.exceptions import HTTPException, NotFound
+    from werkzeug.exceptions import HTTPException
 
     @app.errorhandler(HTTPException)
     def handle_http_exception(e):
-        """Retorna JSON para erros HTTP (404, 405, etc) sem log crítico."""
         code = e.code
-        
-        # Se a rota for API ou Auth, retorna JSON consistente
+
         if request.path.startswith("/api") or request.path.startswith("/auth"):
             return jsonify({
                 "error": True,
                 "message": e.description,
                 "code": code
             }), code
-        
-        # Fallback para o index.html (SPA) em caso de 404 em rotas não-API
+
         if code == 404:
             return app.send_static_file("index.html")
-            
+
         return jsonify({"error": True, "message": e.description}), code
 
     @app.errorhandler(Exception)
     def handle_exception(e):
-        """Loga erros internos (500) com traceback e retorna JSON."""
-        # Se por algum motivo uma HTTPException cair aqui, delega para o handler correto
         if isinstance(e, HTTPException):
             return handle_http_exception(e)
 
-        # Log crítico apenas para erros reais do servidor
         logger.error(f"🔥 ERRO INTERNO: {str(e)}", exc_info=True)
-        
+
         return jsonify({
             "error": True,
             "message": "Erro interno do servidor",
