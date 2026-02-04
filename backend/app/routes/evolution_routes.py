@@ -9,8 +9,13 @@ evolution_bp = Blueprint("evolution_bp", __name__)
 def evolution_health():
     return jsonify({"ok": True}), 200
 
-@evolution_bp.post("/evolution/functions")
+
+@evolution_bp.route("/evolution/functions", methods=["GET", "POST"])
 def evolution_functions():
+    """
+    O painel do Evolution pode fazer GET para testar.
+    E o bot pode fazer POST quando realmente chamar tools.
+    """
     payload = request.get_json(silent=True) or {}
-    logger.info("EVOLUTION FUNCTIONS CALL payload=%s", payload)
+    logger.info("EVOLUTION FUNCTIONS CALL method=%s payload=%s", request.method, payload)
     return jsonify({"ok": True, "message": "functions endpoint alive"}), 200
