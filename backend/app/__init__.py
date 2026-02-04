@@ -237,8 +237,13 @@ def create_app():
                     id SERIAL PRIMARY KEY, clinic_id INTEGER NOT NULL, campaign_id INTEGER, name VARCHAR(100), 
                     phone VARCHAR(30), status VARCHAR(20) DEFAULT 'novo', source VARCHAR(50), 
                     chatbot_state VARCHAR(50) DEFAULT 'START', chatbot_data JSON DEFAULT '{}', 
-                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(), updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(), updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                    is_deleted BOOLEAN DEFAULT FALSE, deleted_at TIMESTAMP WITHOUT TIME ZONE
                 );
+                -- Garantir que as colunas existam caso a tabela já tenha sido criada
+                ALTER TABLE marketing_leads ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;
+                ALTER TABLE marketing_leads ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITHOUT TIME ZONE;
+                CREATE INDEX IF NOT EXISTS idx_leads_clinic_deleted ON marketing_leads (clinic_id, is_deleted);
                 CREATE TABLE IF NOT EXISTS marketing_lead_events (
                     id SERIAL PRIMARY KEY, lead_id INTEGER, campaign_id INTEGER, event_type VARCHAR(50), 
                     metadata_json JSON, created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
@@ -258,22 +263,18 @@ def create_app():
             return jsonify({"error": str(e)}), 500
 
     # --- HANDLER GLOBAL DE ERROS (JSON) ---
-    @app.errorhandler(Exception)
-    def handle_exception(e):
-        # Se for um erro HTTP (ex: 404, 405), mantém o código original
-        from werkzeug.exceptions import HTTPException
-        code = 500
-        if isinstance(e, HTTPException):
-            code = e.code
+    from werkzeug.exceptions import HTTPException, NotFound
+
+    @app.errorhandler(HTTPException)
+    def handle_http_exception(e):
+        """Retorna JSON para erros HTTP (404, 405, etc) sem log crítico."""
+        code = e.code
         
-        # Log do erro para debug no Render
-        logger.error(f"🔥 ERRO GLOBAL: {str(e)}", exc_info=True)
-        
-        # Se a rota for API ou Auth, retorna JSON
+        # Se a rota for API ou Auth, retorna JSON consistente
         if request.path.startswith("/api") or request.path.startswith("/auth"):
             return jsonify({
                 "error": True,
-                "message": str(e),
+                "message": e.description,
                 "code": code
             }), code
         
@@ -281,7 +282,23 @@ def create_app():
         if code == 404:
             return app.send_static_file("index.html")
             
-        return jsonify({"error": True, "message": "Erro interno do servidor"}), 500
+        return jsonify({"error": True, "message": e.description}), code
+
+    @app.errorhandler(Exception)
+    def handle_exception(e):
+        """Loga erros internos (500) com traceback e retorna JSON."""
+        # Se por algum motivo uma HTTPException cair aqui, delega para o handler correto
+        if isinstance(e, HTTPException):
+            return handle_http_exception(e)
+
+        # Log crítico apenas para erros reais do servidor
+        logger.error(f"🔥 ERRO INTERNO: {str(e)}", exc_info=True)
+        
+        return jsonify({
+            "error": True,
+            "message": "Erro interno do servidor",
+            "code": 500
+        }), 500
 
     # --- FRONTEND (SPA) ---
     @app.route("/")

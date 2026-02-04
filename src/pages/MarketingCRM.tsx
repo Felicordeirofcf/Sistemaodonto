@@ -264,8 +264,10 @@ export function MarketingCRM() {
       } catch(e) { alert("Erro ao criar lead."); }
   };
 
+  const [isDeleting, setIsDeleting] = useState<number | null>(null);
+
   const handleDeleteLead = async (id: number) => {
-    if (!window.confirm("Tem certeza que deseja excluir este lead?")) return;
+    setIsDeleting(id);
     try {
       const res = await fetch(`/api/marketing/leads/${id}`, {
         method: 'DELETE',
@@ -274,10 +276,12 @@ export function MarketingCRM() {
       if (res.ok) {
         setLeads(prev => prev.filter(l => l.id !== id));
       } else {
-        alert("Erro ao excluir lead.");
+        alert("Não foi possível excluir, tente novamente.");
       }
-    } catch (e) {
-      alert("Erro de rede ao excluir lead.");
+    } catch (error) {
+      alert("Não foi possível excluir, tente novamente.");
+    } finally {
+      setIsDeleting(null);
     }
   };
 
@@ -366,11 +370,16 @@ export function MarketingCRM() {
                                 <Draggable key={item.id} draggableId={String(item.id)} index={idx}>{(p, s) => (
                                     <div ref={p.innerRef} {...p.draggableProps} {...p.dragHandleProps} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 group hover:border-blue-300 transition-all relative">
                                         <button 
-                                          onClick={() => handleDeleteLead(item.id)}
-                                          className="absolute top-2 right-2 p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                                          onClick={() => {
+                                            if (window.confirm("Tem certeza que deseja excluir este lead?")) {
+                                              handleDeleteLead(item.id);
+                                            }
+                                          }}
+                                          disabled={isDeleting === item.id}
+                                          className="absolute top-2 right-2 p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
                                           title="Excluir Lead"
                                         >
-                                          <Trash2 size={14} />
+                                          {isDeleting === item.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                                         </button>
                                         <div className="font-bold text-sm text-gray-800 pr-6">{item.name}</div>
                                         <div className="flex items-center gap-1 text-[10px] text-gray-400 mt-2 uppercase font-bold"><div className={`w-1.5 h-1.5 rounded-full ${item.source === 'Instagram' ? 'bg-purple-500' : item.source === 'Facebook' ? 'bg-blue-600' : 'bg-gray-400'}`}></div>{item.source}</div>

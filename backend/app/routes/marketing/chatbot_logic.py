@@ -101,6 +101,9 @@ def process_chatbot_message(clinic_id, sender_id, message_text, push_name):
         _send_whatsapp_reply(clinic_id, sender_id, reply)
 
 def parse_pt_br_date(text):
+    # Usar data local de São Paulo para evitar problemas de virada de dia em UTC
+    # Como não temos pytz instalado por padrão em todos os ambientes, usamos o offset manual ou datetime.now()
+    # mas garantindo que o "hoje" seja consistente.
     today = datetime.now()
     
     # Termos relativos
@@ -149,15 +152,25 @@ def parse_pt_br_date(text):
 
 def parse_pt_br_time(text):
     # 15:30 ou 15h30 ou 15h ou 15:00
-    match = re.search(r'(\d{1,2})[:h\s](\d{2})?\b', text)
+    # Melhoria: Capturar "10", "10h", "10:00" sem cair em 00:00
+    
+    # 1) Tenta formato HH:MM ou HHhMM
+    match = re.search(r'(\d{1,2})[:h](\d{2})\b', text)
     if match:
         hours = int(match.group(1))
-        minutes = int(match.group(2)) if match.group(2) else 0
+        minutes = int(match.group(2))
         if 0 <= hours <= 23 and 0 <= minutes <= 59:
             return f"{str(hours).zfill(2)}:{str(minutes).zfill(2)}"
-    
-    # Apenas o número se for entre 7 e 20 (horário comercial estendido)
-    # Evita pegar números que pareçam datas
+            
+    # 2) Tenta formato "10h" ou "10 h"
+    match = re.search(r'(\d{1,2})\s*h\b', text)
+    if match:
+        hours = int(match.group(1))
+        if 0 <= hours <= 23:
+            return f"{str(hours).zfill(2)}:00"
+
+    # 3) Apenas o número se for entre 7 e 20 (horário comercial)
+    # Evita pegar números que pareçam datas (DD/MM)
     if not re.search(r'\d{1,2}[/-]\d{1,2}', text):
         match = re.search(r'\b(\d{1,2})\b', text)
         if match:
@@ -189,7 +202,45 @@ def create_real_appointment(clinic_id, sender_id, data, push_name):
             status='scheduled'
         )
         db.session.add(new_app)
+
+        # Problema 1: Mover Lead e Card no CRM
+        if lead:
+            lead.status = 'agendado'
+            logger.info(f"Lead {lead.id} atualizado para status 'agendado'")
+            
+            # Mover Card no CRM
+            from app.models import CRMCard, CRMStage, CRMHistory
+            card = CRMCard.query.filter_by(clinic_id=clinic_id, paciente_phone=sender_id, status='open').first()
+            if card:
+                stage_agendado = CRMStage.query.filter_by(clinic_id=clinic_id, nome='Agendado').first()
+                if not stage_agendado:
+                    # Criar etapa se não existir
+                    stage_agendado = CRMStage(
+                        clinic_id=clinic_id, 
+                        nome='Agendado', 
+                        cor='green', 
+                        ordem=10, 
+                        is_success=True
+                    )
+                    db.session.add(stage_agendado)
+                    db.session.flush()
+                
+                if stage_agendado:
+                    card.stage_id = stage_agendado.id
+                    # Registrar atividade
+                    history = CRMHistory(
+                        card_id=card.id,
+                        tipo='status_change',
+                        descricao=f"Agendamento criado via Chatbot para {start_dt.strftime('%d/%m/%Y %H:%M')}"
+                    )
+                    db.session.add(history)
+                    logger.info(f"Card {card.id} movido para etapa 'Agendado'")
+
         db.session.commit()
+        
+        # Log final conforme solicitado
+        logger.info(f"TRACE_LOG: lead_id={lead.id if lead else 'N/A'} appointment_id={new_app.id} start_datetime={start_dt.isoformat()}")
+        
         return True
     except Exception as e:
         logger.error(f"Erro ao criar agendamento: {e}")

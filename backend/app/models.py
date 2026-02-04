@@ -379,6 +379,10 @@ class Lead(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Soft Delete
+    is_deleted = db.Column(db.Boolean, default=False, nullable=False)
+    deleted_at = db.Column(db.DateTime, nullable=True)
+
 
 class LeadEvent(db.Model):
     __tablename__ = 'marketing_lead_events'

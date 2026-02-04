@@ -125,12 +125,26 @@ export function Agenda() {
 
   const openEditModal = (appt: Appointment) => {
     setSelectedAppt(appt);
-    const dt = new Date(appt.start);
+    
+    // Corrigir parsing de data local para evitar que "2026-02-05" vire "2026-02-04" devido ao timezone
+    // Se a string não tem 'T', o JS interpreta como UTC. Se tem 'T', interpreta como local (em alguns browsers).
+    // A melhor forma é dar split e usar os componentes.
+    let datePart = '';
+    let timePart = '';
+    
+    if (appt.start.includes('T')) {
+      [datePart, timePart] = appt.start.split('T');
+      timePart = timePart.slice(0, 5);
+    } else {
+      [datePart, timePart] = appt.start.split(' ');
+      timePart = (timePart || '09:00').slice(0, 5);
+    }
+
     setFormData({
       title: appt.title,
       description: appt.description,
-      date: dt.toISOString().split('T')[0],
-      time: dt.toTimeString().slice(0, 5),
+      date: datePart,
+      time: timePart,
       duration: '1', // Simplified
       status: appt.status
     });

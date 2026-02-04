@@ -268,7 +268,14 @@ def get_qr_code(campaign_id):
 @jwt_required()
 def list_leads():
     clinic_id = _get_clinic_id_from_jwt()
-    leads = Lead.query.filter_by(clinic_id=clinic_id).order_by(Lead.created_at.desc()).all()
+    include_deleted = request.args.get('include_deleted', 'false').lower() == 'true'
+    
+    query = Lead.query.filter_by(clinic_id=clinic_id)
+    
+    if not include_deleted:
+        query = query.filter(Lead.is_deleted == False)
+        
+    leads = query.order_by(Lead.created_at.desc()).all()
     
     return jsonify([{
         "id": l.id,
@@ -277,24 +284,42 @@ def list_leads():
         "status": l.status,
         "source": l.source,
         "campaign_id": l.campaign_id,
-        "created_at": l.created_at.isoformat() if l.created_at else None
+        "created_at": l.created_at.isoformat() if l.created_at else None,
+        "is_deleted": l.is_deleted
     } for l in leads]), 200
 
 @bp.route('/leads/<int:id>', methods=['DELETE'])
 @jwt_required()
 def delete_lead(id):
+    from datetime import datetime
     clinic_id = _get_clinic_id_from_jwt()
     lead = Lead.query.filter_by(id=id, clinic_id=clinic_id).first_or_404()
 
     try:
-        # Deletar eventos relacionados primeiro
-        LeadEvent.query.filter_by(lead_id=lead.id).delete(synchronize_session=False)
+        # Soft Delete
+        lead.is_deleted = True
+        lead.deleted_at = datetime.utcnow()
         
-        db.session.delete(lead)
         db.session.commit()
-        return jsonify({"message": "Lead excluído com sucesso"}), 200
+        return jsonify({"success": True, "message": "Lead excluído com sucesso"}), 200
 
     except Exception as e:
         db.session.rollback()
         logger.exception(f"Erro ao excluir lead {id}: {e}")
         return jsonify({"error": "Falha ao excluir lead"}), 500
+
+@bp.route('/leads/<int:id>/restore', methods=['POST'])
+@jwt_required()
+def restore_lead(id):
+    clinic_id = _get_clinic_id_from_jwt()
+    lead = Lead.query.filter_by(id=id, clinic_id=clinic_id).first_or_404()
+
+    try:
+        lead.is_deleted = False
+        lead.deleted_at = None
+        db.session.commit()
+        return jsonify({"success": True, "message": "Lead restaurado com sucesso"}), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Erro ao restaurar lead {id}: {e}")
+        return jsonify({"error": "Falha ao restaurar lead"}), 500
