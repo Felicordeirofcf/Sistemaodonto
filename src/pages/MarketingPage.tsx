@@ -30,6 +30,9 @@ interface CRMCard {
   status: string;
   campanha?: string;
   origem?: string;
+
+  // ✅ opcional (caso backend já devolva o lead_id real separado do card)
+  lead_id?: number;
 }
 
 interface CRMStage {
@@ -50,6 +53,11 @@ const MarketingPage: React.FC = () => {
   const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false);
   const [isAgendaModalOpen, setIsAgendaModalOpen] = useState(false);
   const [savingAgenda, setSavingAgenda] = useState(false);
+
+  // ✅ Modal deletar lead
+  const [isDeleteLeadModalOpen, setIsDeleteLeadModalOpen] = useState(false);
+  const [deletingLead, setDeletingLead] = useState(false);
+  const [selectedLead, setSelectedLead] = useState<CRMCard | null>(null);
 
   const [ruleForm, setRuleForm] = useState({
     nome: '',
@@ -109,7 +117,6 @@ const MarketingPage: React.FC = () => {
         alert('Link copiado!');
         return;
       }
-      // fallback antigo
       const el = document.createElement('textarea');
       el.value = text;
       document.body.appendChild(el);
@@ -159,7 +166,6 @@ const MarketingPage: React.FC = () => {
       });
 
       if (res.ok) {
-        // se o backend devolver tracking_url, já copia
         try {
           const created = await res.json();
           if (created?.tracking_url) {
@@ -200,10 +206,19 @@ const MarketingPage: React.FC = () => {
     fetchData();
   };
 
+  // ✅ util: tenta obter o lead_id real
+  // - se backend já manda lead_id no card, usa
+  // - senão, assume que card.id é lead_id (se seu backend está assim)
+  const resolveLeadId = (card: CRMCard) => {
+    return card.lead_id ?? card.id;
+  };
+
   // --- AGENDA ---
   const openAgendaModal = (card: CRMCard) => {
+    const leadId = resolveLeadId(card);
+
     setAgendaForm({
-      lead_id: card.id,
+      lead_id: leadId,
       title: `${card.paciente_nome} - ${card.campanha || 'Consulta'}`,
       date: new Date().toISOString().split('T')[0],
       time: '09:00',
@@ -216,7 +231,9 @@ const MarketingPage: React.FC = () => {
     e.preventDefault();
     setSavingAgenda(true);
     try {
-      const start = `${agendaForm.date}T${agendaForm.time}:00`;
+      // ✅ envia start como "YYYY-MM-DD HH:MM" (local), evitando bug de timezone
+      const start = `${agendaForm.date} ${agendaForm.time}`;
+
       const res = await fetch('/api/appointments', {
         method: 'POST',
         headers: {
@@ -226,14 +243,17 @@ const MarketingPage: React.FC = () => {
         body: JSON.stringify({
           title: agendaForm.title,
           description: agendaForm.description,
-          start: start,
+          start,
+          duration: 30, // ✅ padrão 30min
           lead_id: agendaForm.lead_id,
           status: 'scheduled'
         })
       });
+
       if (res.ok) {
         alert('Agendamento realizado com sucesso!');
         setIsAgendaModalOpen(false);
+        fetchData(); // ✅ refetch pra refletir mudanças no CRM (se backend move etapa)
       } else {
         alert('Falha ao agendar (verifique o backend / migrations).');
       }
@@ -241,6 +261,49 @@ const MarketingPage: React.FC = () => {
       alert('Erro ao agendar');
     } finally {
       setSavingAgenda(false);
+    }
+  };
+
+  // ✅ EXCLUIR LEAD (modal + otimista)
+  const openDeleteLeadModal = (card: CRMCard) => {
+    setSelectedLead(card);
+    setIsDeleteLeadModalOpen(true);
+  };
+
+  const handleDeleteLead = async () => {
+    if (!selectedLead) return;
+    setDeletingLead(true);
+
+    const leadId = resolveLeadId(selectedLead);
+
+    try {
+      const res = await fetch(`${API_URL}/leads/${leadId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!res.ok) {
+        alert('Falha ao excluir lead (verifique backend / rota).');
+        return;
+      }
+
+      // ✅ remove da UI sem precisar esperar o fetch (mais "robusto" pro usuário)
+      setCrmBoard(prev =>
+        prev.map(stage => ({
+          ...stage,
+          cards: stage.cards.filter(c => resolveLeadId(c) !== leadId)
+        }))
+      );
+
+      setIsDeleteLeadModalOpen(false);
+      setSelectedLead(null);
+
+      // opcional: refetch pra garantir consistência com backend
+      fetchData();
+    } catch (e) {
+      alert('Erro ao excluir lead');
+    } finally {
+      setDeletingLead(false);
     }
   };
 
@@ -253,6 +316,14 @@ const MarketingPage: React.FC = () => {
     };
     return map[cor] || 'border-gray-200';
   };
+
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50">
+        <Loader2 className="animate-spin text-blue-600" size={48} />
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 bg-gray-50 min-h-screen text-gray-800">
@@ -351,7 +422,6 @@ const MarketingPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* ✅ LINK + COPIAR */}
                 <div className="bg-gray-50 rounded p-2 mb-3 flex items-center justify-between border">
                   <span className="text-xs text-gray-600 truncate max-w-[220px]">
                     {camp.tracking_url}
@@ -395,13 +465,26 @@ const MarketingPage: React.FC = () => {
               <div className="space-y-3">
                 {stage.cards.map(card => (
                   <div key={card.id} className={`bg-white p-4 rounded-lg shadow-sm border-l-4 group relative ${getColorClass(stage.cor)}`}>
-                    <button
-                      onClick={() => openAgendaModal(card)}
-                      className="absolute top-2 right-2 p-1.5 bg-blue-50 text-blue-600 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-blue-100"
-                      title="Agendar"
-                    >
-                      <Calendar size={14} />
-                    </button>
+                    <div className="absolute top-2 right-2 flex gap-2">
+                      {/* ✅ Agendar */}
+                      <button
+                        onClick={() => openAgendaModal(card)}
+                        className="p-1.5 bg-blue-50 text-blue-600 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-blue-100"
+                        title="Agendar"
+                      >
+                        <Calendar size={14} />
+                      </button>
+
+                      {/* ✅ Excluir Lead */}
+                      <button
+                        onClick={() => openDeleteLeadModal(card)}
+                        className="p-1.5 bg-red-50 text-red-600 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100"
+                        title="Excluir lead"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+
                     <div className="font-bold text-gray-800">{card.paciente_nome}</div>
                     {card.campanha && (
                       <div className="text-[11px] text-blue-600 font-medium mt-1">
@@ -419,6 +502,46 @@ const MarketingPage: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {/* MODAL DELETAR LEAD */}
+      {isDeleteLeadModalOpen && selectedLead && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-white p-6 rounded-xl w-full max-w-md shadow-2xl">
+            <div className="flex justify-between items-center mb-3">
+              <h2 className="font-bold text-xl text-gray-800">Excluir lead</h2>
+              <button onClick={() => { setIsDeleteLeadModalOpen(false); setSelectedLead(null); }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-600 mb-4">
+              Tem certeza que deseja excluir o lead <strong>{selectedLead.paciente_nome}</strong> ({selectedLead.paciente_phone})?
+              <br />
+              Essa ação não pode ser desfeita.
+            </p>
+
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => { setIsDeleteLeadModalOpen(false); setSelectedLead(null); }}
+                className="px-4 py-2 text-gray-600"
+                disabled={deletingLead}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteLead}
+                disabled={deletingLead}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg font-bold flex items-center gap-2"
+              >
+                {deletingLead ? <Loader2 className="animate-spin" size={16} /> : <Trash2 size={16} />}
+                Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL AGENDAR */}
       {isAgendaModalOpen && (

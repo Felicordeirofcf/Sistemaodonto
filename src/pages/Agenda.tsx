@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  Calendar as CalIcon, ChevronLeft, ChevronRight, Plus, 
-  Check, Clock, AlertCircle, Loader2, X, Trash2
+import {
+  Calendar as CalIcon, ChevronLeft, ChevronRight, Plus,
+  Check, Clock, Loader2, X, Trash2
 } from 'lucide-react';
 
 type Status = 'scheduled' | 'confirmed' | 'done' | 'cancelled';
@@ -10,44 +10,133 @@ interface Appointment {
   id: number;
   title: string;
   description: string;
-  start: string;
-  end: string;
+
+  // ✅ backend pode mandar start/end OU start_datetime/end_datetime OU date_time
+  start?: string;
+  end?: string;
+  start_datetime?: string;
+  end_datetime?: string;
+  date_time?: string;
+
   status: Status;
   patient_id?: number;
   lead_id?: number;
 }
 
+type NormalizedAppointment = {
+  id: number;
+  title: string;
+  description: string;
+  startLocal: Date;
+  endLocal: Date;
+  status: Status;
+  patient_id?: number;
+  lead_id?: number;
+};
+
+// ✅ parse robusto para strings "YYYY-MM-DD HH:MM" (sem timezone) ou ISO
+function parseDateTimeLoose(value?: string): Date | null {
+  if (!value) return null;
+
+  // ISO
+  if (value.includes('T')) {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // "YYYY-MM-DD HH:MM:SS" ou "YYYY-MM-DD HH:MM"
+  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]) - 1;
+    const da = Number(m[3]);
+    const hh = Number(m[4] ?? 9);
+    const mm = Number(m[5] ?? 0);
+    const ss = Number(m[6] ?? 0);
+    // ✅ cria como LOCAL (evita virar dia anterior por UTC)
+    const d = new Date(y, mo, da, hh, mm, ss, 0);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // fallback
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function toYMDLocal(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function toHMLocal(date: Date): string {
+  const h = String(date.getHours()).padStart(2, '0');
+  const m = String(date.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+function normalizeAppointment(a: Appointment): NormalizedAppointment | null {
+  const startStr = a.start_datetime || a.start || a.date_time;
+  const endStr = a.end_datetime || a.end;
+
+  const startLocal = parseDateTimeLoose(startStr);
+  if (!startLocal) return null;
+
+  const endLocal = parseDateTimeLoose(endStr) || new Date(startLocal.getTime() + 30 * 60 * 1000);
+
+  return {
+    id: a.id,
+    title: a.title || 'Consulta',
+    description: a.description || '',
+    startLocal,
+    endLocal,
+    status: a.status || 'scheduled',
+    patient_id: a.patient_id,
+    lead_id: a.lead_id,
+  };
+}
+
 export function Agenda() {
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [appointments, setAppointments] = useState<NormalizedAppointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
-  
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [selectedAppt, setSelectedAppt] = useState<Appointment | null>(null);
-  
+  const [selectedAppt, setSelectedAppt] = useState<NormalizedAppointment | null>(null);
+
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    date: new Date().toISOString().split('T')[0],
+    date: toYMDLocal(new Date()),
     time: '09:00',
-    duration: '1',
+    duration: '30', // ✅ minutos (mais realista que "1")
     status: 'scheduled' as Status
   });
 
   const fetchAgenda = useCallback(async () => {
+    setLoading(true);
     try {
       const token = localStorage.getItem('odonto_token');
-      // Fetch for the current week or month
       const res = await fetch('/api/appointments', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
+
       const data = await res.json();
+
       if (Array.isArray(data)) {
-        setAppointments(data);
+        const normalized = data
+          .map((a: Appointment) => normalizeAppointment(a))
+          .filter(Boolean) as NormalizedAppointment[];
+
+        setAppointments(normalized);
+      } else {
+        setAppointments([]);
       }
     } catch (error) {
       console.error("Erro ao carregar agenda", error);
+      setAppointments([]);
     } finally {
       setLoading(false);
     }
@@ -60,13 +149,14 @@ export function Agenda() {
     setSaving(true);
     try {
       const token = localStorage.getItem('odonto_token');
-      const start = `${formData.date}T${formData.time}:00`;
-      
+
+      // ✅ manda em formato compatível (backend pode aceitar start + duration)
+      const start = `${formData.date} ${formData.time}`; // "YYYY-MM-DD HH:MM" (local)
       const payload = {
         title: formData.title,
         description: formData.description,
-        start: start,
-        duration: formData.duration,
+        start,                // ✅ local string
+        duration: formData.duration, // ✅ minutos
         status: formData.status
       };
 
@@ -75,9 +165,9 @@ export function Agenda() {
 
       const res = await fetch(url, {
         method,
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}` 
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify(payload)
       });
@@ -85,7 +175,9 @@ export function Agenda() {
       if (res.ok) {
         setIsModalOpen(false);
         setSelectedAppt(null);
-        fetchAgenda();
+        await fetchAgenda();
+      } else {
+        console.error("Erro ao salvar. Status:", res.status);
       }
     } catch (error) {
       console.error("Erro ao salvar:", error);
@@ -98,13 +190,18 @@ export function Agenda() {
     if (!window.confirm("Excluir este agendamento?")) return;
     try {
       const token = localStorage.getItem('odonto_token');
-      await fetch(`/api/appointments/${id}`, {
+      const res = await fetch(`/api/appointments/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      fetchAgenda();
-      setIsModalOpen(false);
-      setSelectedAppt(null);
+
+      if (res.ok) {
+        await fetchAgenda();
+        setIsModalOpen(false);
+        setSelectedAppt(null);
+      } else {
+        console.error("Erro ao excluir. Status:", res.status);
+      }
     } catch (error) {
       console.error("Erro ao excluir:", error);
     }
@@ -115,37 +212,22 @@ export function Agenda() {
     setFormData({
       title: '',
       description: '',
-      date: date || new Date().toISOString().split('T')[0],
+      date: date || toYMDLocal(new Date()),
       time: time || '09:00',
-      duration: '1',
+      duration: '30',
       status: 'scheduled'
     });
     setIsModalOpen(true);
   };
 
-  const openEditModal = (appt: Appointment) => {
+  const openEditModal = (appt: NormalizedAppointment) => {
     setSelectedAppt(appt);
-    
-    // Corrigir parsing de data local para evitar que "2026-02-05" vire "2026-02-04" devido ao timezone
-    // Se a string não tem 'T', o JS interpreta como UTC. Se tem 'T', interpreta como local (em alguns browsers).
-    // A melhor forma é dar split e usar os componentes.
-    let datePart = '';
-    let timePart = '';
-    
-    if (appt.start.includes('T')) {
-      [datePart, timePart] = appt.start.split('T');
-      timePart = timePart.slice(0, 5);
-    } else {
-      [datePart, timePart] = appt.start.split(' ');
-      timePart = (timePart || '09:00').slice(0, 5);
-    }
-
     setFormData({
       title: appt.title,
       description: appt.description,
-      date: datePart,
-      time: timePart,
-      duration: '1', // Simplified
+      date: toYMDLocal(appt.startLocal),
+      time: toHMLocal(appt.startLocal),
+      duration: '30',
       status: appt.status
     });
     setIsModalOpen(true);
@@ -153,15 +235,18 @@ export function Agenda() {
 
   // Calendar Helpers
   const hours = Array.from({ length: 11 }, (_, i) => i + 8);
-  
+
   const getStartOfWeek = (date: Date) => {
     const d = new Date(date);
     const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    d.setHours(0, 0, 0, 0);
     return new Date(d.setDate(diff));
   };
 
   const startOfWeek = getStartOfWeek(currentDate);
+
+  // ✅ fullDate local (evita bugs de UTC)
   const weekDays = Array.from({ length: 5 }, (_, i) => {
     const d = new Date(startOfWeek);
     d.setDate(d.getDate() + i);
@@ -169,12 +254,14 @@ export function Agenda() {
       day: i + 1,
       label: ['Seg', 'Ter', 'Qua', 'Qui', 'Sex'][i],
       date: d.getDate().toString(),
-      fullDate: d.toISOString().split('T')[0]
+      fullDate: toYMDLocal(d)
     };
   });
 
+  const todayYMD = toYMDLocal(new Date());
+
   const getStatusColor = (status: Status) => {
-    switch(status) {
+    switch (status) {
       case 'confirmed': return 'bg-blue-50 border-blue-200 text-blue-700';
       case 'scheduled': return 'bg-orange-50 border-orange-200 text-orange-700';
       case 'cancelled': return 'bg-red-50 border-red-200 text-red-700 opacity-60';
@@ -191,7 +278,7 @@ export function Agenda() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 p-8 font-sans overflow-hidden relative">
-      
+
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white p-8 rounded-[2.5rem] w-full max-w-md shadow-2xl animate-in zoom-in duration-200">
@@ -203,46 +290,58 @@ export function Agenda() {
                 <X size={20} className="text-gray-400" />
               </button>
             </div>
-            
+
             <form onSubmit={handleSave} className="space-y-4">
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Título / Paciente</label>
-                <input 
+                <input
                   required
-                  placeholder="Ex: João Silva - Avaliação" 
+                  placeholder="Ex: João Silva - Avaliação"
                   className="w-full p-3 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                   value={formData.title}
-                  onChange={e => setFormData({...formData, title: e.target.value})}
+                  onChange={e => setFormData({ ...formData, title: e.target.value })}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Data</label>
-                  <input type="date" required className="w-full p-3 bg-gray-50 border rounded-xl outline-none" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
+                  <input
+                    type="date"
+                    required
+                    className="w-full p-3 bg-gray-50 border rounded-xl outline-none"
+                    value={formData.date}
+                    onChange={e => setFormData({ ...formData, date: e.target.value })}
+                  />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Horário</label>
-                  <input type="time" required className="w-full p-3 bg-gray-50 border rounded-xl outline-none" value={formData.time} onChange={e => setFormData({...formData, time: e.target.value})} />
+                  <input
+                    type="time"
+                    required
+                    className="w-full p-3 bg-gray-50 border rounded-xl outline-none"
+                    value={formData.time}
+                    onChange={e => setFormData({ ...formData, time: e.target.value })}
+                  />
                 </div>
               </div>
 
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Procedimento / Notas</label>
-                <textarea 
-                  className="w-full p-3 bg-gray-50 border rounded-xl outline-none" 
+                <textarea
+                  className="w-full p-3 bg-gray-50 border rounded-xl outline-none"
                   rows={2}
-                  value={formData.description} 
-                  onChange={e => setFormData({...formData, description: e.target.value})}
+                  value={formData.description}
+                  onChange={e => setFormData({ ...formData, description: e.target.value })}
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Status</label>
-                <select 
-                  className="w-full p-3 bg-gray-50 border rounded-xl outline-none" 
-                  value={formData.status} 
-                  onChange={e => setFormData({...formData, status: e.target.value as Status})}
+                <select
+                  className="w-full p-3 bg-gray-50 border rounded-xl outline-none"
+                  value={formData.status}
+                  onChange={e => setFormData({ ...formData, status: e.target.value as Status })}
                 >
                   <option value="scheduled">Agendado</option>
                   <option value="confirmed">Confirmado</option>
@@ -253,7 +352,7 @@ export function Agenda() {
 
               <div className="flex gap-3 mt-4">
                 {selectedAppt && (
-                  <button 
+                  <button
                     type="button"
                     onClick={() => handleDelete(selectedAppt.id)}
                     className="p-4 bg-red-50 text-red-600 rounded-2xl hover:bg-red-100 transition-colors"
@@ -261,8 +360,8 @@ export function Agenda() {
                     <Trash2 size={20} />
                   </button>
                 )}
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   disabled={saving}
                   className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-blue-100 flex items-center justify-center gap-2"
                 >
@@ -278,8 +377,8 @@ export function Agenda() {
         <div>
           <h1 className="text-3xl font-black text-gray-900 tracking-tight flex items-center gap-3">
             <div className="bg-blue-600 p-2 rounded-2xl shadow-lg shadow-blue-200">
-              <CalIcon className="text-white w-6 h-6"/>
-            </div> 
+              <CalIcon className="text-white w-6 h-6" />
+            </div>
             Agenda Clínica
           </h1>
           <p className="text-gray-500 font-medium mt-1">Gestão inteligente de horários e salas.</p>
@@ -287,7 +386,7 @@ export function Agenda() {
 
         <div className="flex items-center gap-4">
           <div className="flex items-center bg-white p-1 rounded-2xl shadow-sm border border-gray-100">
-            <button 
+            <button
               onClick={() => {
                 const d = new Date(currentDate);
                 d.setDate(d.getDate() - 7);
@@ -300,7 +399,7 @@ export function Agenda() {
             <span className="font-black text-gray-700 px-4 text-xs uppercase tracking-widest">
               {currentDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
             </span>
-            <button 
+            <button
               onClick={() => {
                 const d = new Date(currentDate);
                 d.setDate(d.getDate() + 7);
@@ -311,7 +410,7 @@ export function Agenda() {
               <ChevronRight size={20} />
             </button>
           </div>
-          <button 
+          <button
             onClick={() => openCreateModal()}
             className="bg-blue-600 text-white px-6 py-3 rounded-2xl flex items-center gap-2 hover:bg-blue-700 shadow-xl shadow-blue-100 text-xs font-black uppercase tracking-widest transition-all active:scale-95"
           >
@@ -326,7 +425,7 @@ export function Agenda() {
           {weekDays.map(d => (
             <div key={d.day} className="p-4 text-center border-r border-gray-100 last:border-0">
               <span className="text-[10px] text-gray-400 uppercase font-black tracking-widest block mb-1">{d.label}</span>
-              <div className={`w-8 h-8 mx-auto flex items-center justify-center rounded-2xl font-black text-sm transition-all ${d.fullDate === new Date().toISOString().split('T')[0] ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-gray-800 hover:bg-gray-200'}`}>
+              <div className={`w-8 h-8 mx-auto flex items-center justify-center rounded-2xl font-black text-sm transition-all ${d.fullDate === todayYMD ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-gray-800 hover:bg-gray-200'}`}>
                 {d.date}
               </div>
             </div>
@@ -347,27 +446,32 @@ export function Agenda() {
               <div key={dayInfo.day} className="border-r border-gray-100 last:border-0 relative bg-white">
                 {hours.map(hour => {
                   const hourStr = hour.toString().padStart(2, '0');
-                  const appt = appointments.find(a => {
-                    const d = new Date(a.start);
-                    return d.toISOString().split('T')[0] === dayInfo.fullDate && d.getHours() === hour;
-                  });
-                  
+
+                  // ✅ busca appointment por data local + hora local (sem toISOString)
+                  const appt = appointments.find(a => (
+                    toYMDLocal(a.startLocal) === dayInfo.fullDate &&
+                    a.startLocal.getHours() === hour
+                  ));
+
                   return (
                     <div key={`${dayInfo.day}-${hour}`} className="h-24 border-b border-gray-50 border-dashed relative group hover:bg-blue-50/20 transition-colors">
                       {!appt && (
-                        <button onClick={() => openCreateModal(dayInfo.fullDate, `${hourStr}:00`)} className="absolute inset-0 w-full h-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                          <Plus size={20} className="text-blue-300"/>
+                        <button
+                          onClick={() => openCreateModal(dayInfo.fullDate, `${hourStr}:00`)}
+                          className="absolute inset-0 w-full h-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                        >
+                          <Plus size={20} className="text-blue-300" />
                         </button>
                       )}
                       {appt && (
-                        <div 
+                        <div
                           onClick={() => openEditModal(appt)}
                           className={`absolute inset-x-2 inset-y-2 rounded-[1.5rem] p-4 border-l-4 shadow-sm cursor-pointer z-10 transition-all hover:shadow-md hover:scale-[1.02] ${getStatusColor(appt.status)}`}
                         >
                           <div className="flex justify-between items-start mb-1">
                             <span className="text-[9px] font-black uppercase tracking-widest flex items-center gap-1 opacity-70">
-                               {appt.status === 'confirmed' ? <Check size={10} /> : <Clock size={10} />}
-                               {new Date(appt.start).toTimeString().slice(0, 5)}
+                              {appt.status === 'confirmed' ? <Check size={10} /> : <Clock size={10} />}
+                              {toHMLocal(appt.startLocal)}
                             </span>
                           </div>
                           <p className="font-black text-xs text-gray-800 leading-tight mb-1 truncate">{appt.title}</p>

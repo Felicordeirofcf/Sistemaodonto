@@ -82,6 +82,31 @@ def _extract_tracking_code(message_text: str) -> str:
         if m: return (m.group("code") or "").strip()
     return ""
 
+# --- NOVO: normalização mínima para o bot (remove tokens [ref:...] e texto duplicado) ---
+def _strip_tracking_tokens(text: str) -> str:
+    if not text:
+        return ""
+    text = re.sub(r"\[ref:[A-Za-z0-9_\-]{3,64}\]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bref\s*[:=]\s*[A-Za-z0-9_\-]{3,64}\b", "", text, flags=re.IGNORECASE)
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+def _dedupe_repeated_text(text: str) -> str:
+    if not text:
+        return ""
+    t = text.strip()
+    half = len(t) // 2
+    if half > 10 and t[:half].strip() == t[half:].strip():
+        return t[:half].strip()
+    parts = [p.strip() for p in re.split(r"[\n\r]+", t) if p.strip()]
+    seen = []
+    for p in parts:
+        if p not in seen:
+            seen.append(p)
+    return " ".join(seen).strip()
+
+def _normalize_message_for_bot(text: str) -> str:
+    return _strip_tracking_tokens(_dedupe_repeated_text(text))
+
 def _is_group_message(payload: dict, key: dict, remote_jid: str) -> bool:
     if isinstance(remote_jid, str) and remote_jid.endswith("@g.us"): return True
     if payload.get("isGroup") is True or key.get("participant") or payload.get("participant"): return True
@@ -131,9 +156,15 @@ def whatsapp_webhook():
     if _is_group_message(payload, key, remote_jid): return jsonify({"status": "ignored"}), 200
     phone = _normalize_phone_from_jid(remote_jid)
     if not phone: return jsonify({"status": "ignored"}), 200
-    
+
     push_name = (payload.get('pushName') or 'Paciente').strip()
-    message_text = _extract_message_text(payload)
+
+    # --- ALTERADO: usa texto RAW para extrair tracking e texto limpo para o bot ---
+    message_text_raw = _extract_message_text(payload)
+    if not message_text_raw: return jsonify({"status": "ignored"}), 200
+
+    code = _extract_tracking_code(message_text_raw)  # tracking deve vir do RAW
+    message_text = _normalize_message_for_bot(message_text_raw)  # bot recebe texto limpo
     if not message_text: return jsonify({"status": "ignored"}), 200
 
     # Identificação da Clínica
@@ -153,7 +184,6 @@ def whatsapp_webhook():
     garantir_etapas_crm(clinic_id)
 
     # Tracking de Campanha
-    code = _extract_tracking_code(message_text)
     campaign = Campaign.query.filter(Campaign.tracking_code.ilike(code)).first() if code else None
     source_text = f"Campanha: {campaign.name}" if campaign else "WhatsApp (orgânico)"
 
@@ -164,12 +194,12 @@ def whatsapp_webhook():
     try:
         # Log Event com Trace ID
         db.session.add(LeadEvent(
-            campaign_id=campaign.id if campaign else None, 
-            event_type='msg_in', 
+            campaign_id=campaign.id if campaign else None,
+            event_type='msg_in',
             metadata_json={
-                "phone": phone, 
-                "push_name": push_name, 
-                "message": message_text, 
+                "phone": phone,
+                "push_name": push_name,
+                "message": message_text,  # salva versão limpa (melhor para auditoria)
                 "clinic_id": clinic_id,
                 "trace_id": trace_id
             }
@@ -177,7 +207,7 @@ def whatsapp_webhook():
 
         # Busca Lead existente
         lead = Lead.query.filter_by(clinic_id=clinic_id, phone=phone).first()
-        
+
         # Busca Card Aberto
         existing_card = CRMCard.query.filter(CRMCard.clinic_id == clinic_id, CRMCard.paciente_phone == phone, CRMCard.status == 'open').first()
 
@@ -192,26 +222,26 @@ def whatsapp_webhook():
         if not lead:
             logger.info(f"[{trace_id}] Criando novo lead.")
             lead = Lead(
-                clinic_id=clinic_id, 
-                campaign_id=campaign.id if campaign else None, 
-                name=push_name, 
-                phone=phone, 
-                source=source_text, 
+                clinic_id=clinic_id,
+                campaign_id=campaign.id if campaign else None,
+                name=push_name,
+                phone=phone,
+                source=source_text,
                 status='novo'
             )
             db.session.add(lead)
-        
+
         if not existing_card:
             stage = CRMStage.query.filter_by(clinic_id=clinic_id, is_initial=True).first()
             if stage:
                 logger.info(f"[{trace_id}] Criando novo card no CRM.")
                 novo_card = CRMCard(
-                    clinic_id=clinic_id, 
-                    stage_id=stage.id, 
-                    paciente_nome=push_name, 
-                    paciente_phone=phone, 
-                    historico_conversas=f"{source_text}: {message_text}", 
-                    status='open', 
+                    clinic_id=clinic_id,
+                    stage_id=stage.id,
+                    paciente_nome=push_name,
+                    paciente_phone=phone,
+                    historico_conversas=f"{source_text}: {message_text}",
+                    status='open',
                     ultima_interacao=datetime.utcnow()
                 )
                 db.session.add(novo_card)
@@ -219,7 +249,7 @@ def whatsapp_webhook():
         if campaign and not existing_card:
             logger.info(f"[{trace_id}] Incrementando conversão da campanha {campaign.id}.")
             campaign.leads_count = (campaign.leads_count or 0) + 1
-            
+
         db.session.commit()
 
         # --- CHATBOT LOGIC ---
