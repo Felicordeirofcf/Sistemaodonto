@@ -1,14 +1,12 @@
 from flask import Blueprint, request, jsonify, redirect, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models import db, Campaign, Lead, LeadEvent, Clinic, User
+from app.models import db, Campaign, Lead, LeadEvent, Clinic
 import shortuuid
 import qrcode
 from io import BytesIO
 import logging
 import urllib.parse
 import os
-
-from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('marketing_campaigns', __name__)
@@ -20,32 +18,13 @@ DEFAULT_CLINIC_WHATSAPP = os.getenv("DEFAULT_CLINIC_WHATSAPP", "")
 # ------------------------------------------------------------------------------
 
 def _get_clinic_id_from_jwt() -> int:
-    """
-    Multi-tenant safe:
-    - identity pode ser dict com clinic_id
-    - ou user_id (int/str) -> busca User e pega clinic_id
-    """
     identity = get_jwt_identity()
-
-    if isinstance(identity, dict):
-        cid = identity.get("clinic_id")
+    if isinstance(identity, dict) and identity.get("clinic_id"):
         try:
-            return int(cid) if cid is not None else 1
+            return int(identity["clinic_id"])
         except Exception:
             return 1
-
-    # fallback: identity = user_id
-    try:
-        user_id = int(identity)
-    except Exception:
-        user_id = None
-
-    if not user_id:
-        return 1
-
-    user = User.query.get(user_id)
-    return int(user.clinic_id) if user and user.clinic_id else 1
-
+    return 1
 
 def _safe_int(value, default=0) -> int:
     try:
@@ -53,10 +32,8 @@ def _safe_int(value, default=0) -> int:
     except Exception:
         return default
 
-
 def _only_digits(value: str) -> str:
     return "".join(filter(str.isdigit, value or ""))
-
 
 def _generate_unique_code(length=5, max_tries=30) -> str:
     """
@@ -70,7 +47,6 @@ def _generate_unique_code(length=5, max_tries=30) -> str:
             return code
     return su.random(length=8)
 
-
 def _ensure_ref_in_message(msg_template: str, code: str) -> str:
     msg_template = (msg_template or "Olá, gostaria de saber mais.").strip()
 
@@ -83,19 +59,6 @@ def _ensure_ref_in_message(msg_template: str, code: str) -> str:
         msg_template = msg_template + f" {ref_tag}"
 
     return msg_template
-
-
-def _urls_for_code(code: str):
-    """
-    Retorna:
-    - public_url: /c/<code>  (mais curto; funciona porque você registrou o blueprint na raiz)
-    - api_url: /c/<code> (compatível com seu frontend atual)
-    """
-    base_url = request.host_url.rstrip("/")
-    return {
-        "public_url": f"{base_url}/c/{code}",
-        "api_url": f"{base_url}/c/{code}",
-    }
 
 
 # ==============================================================================
@@ -137,37 +100,20 @@ def create_campaign():
     if hasattr(new_campaign, "leads_count") and getattr(new_campaign, "leads_count", None) is None:
         new_campaign.leads_count = 0
 
-    try:
-        db.session.add(new_campaign)
-        db.session.commit()
-    except IntegrityError as e:
-        db.session.rollback()
-        # slug/tracking_code únicos podem colidir
-        logger.warning(f"IntegrityError ao criar campanha: {e}")
-        return jsonify({"error": "Não foi possível criar campanha (slug ou código já existe). Tente novamente."}), 409
-    except Exception as e:
-        db.session.rollback()
-        logger.exception(f"Erro ao criar campanha: {e}")
-        return jsonify({"error": "Falha ao criar campanha"}), 500
+    db.session.add(new_campaign)
+    db.session.commit()
 
-    urls = _urls_for_code(code)
-    base_url = request.host_url.rstrip("/")
+    base_url = request.host_url.rstrip('/')
+    tracking_url = f"{base_url}/api/marketing/c/{code}"
 
     return jsonify({
         "id": new_campaign.id,
         "name": new_campaign.name,
         "tracking_code": code,
-
-        # mantém compat com seu front atual:
-        "tracking_url": urls["api_url"],
-
-        # bônus útil p/ você (link curto p/ vender o sistema):
-        "public_url": urls["public_url"],
-
+        "tracking_url": tracking_url,
         "active": bool(new_campaign.active),
         "clicks": _safe_int(getattr(new_campaign, "clicks_count", 0), 0),
         "leads": _safe_int(getattr(new_campaign, "leads_count", 0), 0),
-
         "qr_code_url": f"{base_url}/api/marketing/campaigns/{new_campaign.id}/qr"
     }), 201
 
@@ -180,27 +126,16 @@ def list_campaigns():
 
     campaigns = Campaign.query.filter_by(clinic_id=clinic_id).order_by(Campaign.created_at.desc()).all()
 
-    out = []
-    for c in campaigns:
-        urls = _urls_for_code(c.tracking_code)
-        out.append({
-            "id": c.id,
-            "name": c.name,
-            "tracking_code": c.tracking_code,
-
-            # compat com front atual:
-            "tracking_url": urls["api_url"],
-
-            # extra:
-            "public_url": urls["public_url"],
-
-            "active": bool(c.active),
-            "clicks": _safe_int(getattr(c, "clicks_count", 0), 0),
-            "leads": _safe_int(getattr(c, "leads_count", 0), 0),
-            "qr_code_url": f"{base_url}/api/marketing/campaigns/{c.id}/qr"
-        })
-
-    return jsonify(out), 200
+    return jsonify([{
+        "id": c.id,
+        "name": c.name,
+        "tracking_code": c.tracking_code,
+        "tracking_url": f"{base_url}/api/marketing/c/{c.tracking_code}",
+        "active": bool(c.active),
+        "clicks": _safe_int(getattr(c, "clicks_count", 0), 0),
+        "leads": _safe_int(getattr(c, "leads_count", 0), 0),
+        "qr_code_url": f"{base_url}/api/marketing/campaigns/{c.id}/qr"
+    } for c in campaigns]), 200
 
 
 @bp.route('/campaigns/<int:id>/status', methods=['PATCH'])
@@ -225,8 +160,6 @@ def delete_campaign(id):
 
     try:
         LeadEvent.query.filter_by(campaign_id=camp.id).delete(synchronize_session=False)
-
-        # desvincula leads
         Lead.query.filter_by(campaign_id=camp.id).update(
             {Lead.campaign_id: None},
             synchronize_session=False
@@ -308,10 +241,8 @@ def track_click_and_redirect(code):
 def get_qr_code(campaign_id):
     try:
         camp = Campaign.query.get_or_404(campaign_id)
-
-        # ✅ usa o link curto (melhor pro cliente escanear/compartilhar)
         base_url = request.host_url.rstrip('/')
-        link = f"{base_url}/c/{camp.tracking_code}"
+        link = f"{base_url}/api/marketing/c/{camp.tracking_code}"
 
         qr = qrcode.QRCode(version=1, box_size=10, border=5)
         qr.add_data(link)
@@ -322,12 +253,12 @@ def get_qr_code(campaign_id):
         img.save(img_io, 'PNG')
         img_io.seek(0)
 
+        # Opcional: cache leve no client/CDN
         return send_file(img_io, mimetype='image/png', max_age=60)
 
     except Exception as e:
         logger.exception(f"Erro ao gerar QR: {e}")
         return jsonify({"error": "Erro ao gerar QR"}), 500
-
 
 # ==============================================================================
 # 4. GESTÃO DE LEADS
@@ -338,14 +269,14 @@ def get_qr_code(campaign_id):
 def list_leads():
     clinic_id = _get_clinic_id_from_jwt()
     include_deleted = request.args.get('include_deleted', 'false').lower() == 'true'
-
+    
     query = Lead.query.filter_by(clinic_id=clinic_id)
-
+    
     if not include_deleted:
         query = query.filter(Lead.is_deleted == False)
-
+        
     leads = query.order_by(Lead.created_at.desc()).all()
-
+    
     return jsonify([{
         "id": l.id,
         "name": l.name,
@@ -357,7 +288,6 @@ def list_leads():
         "is_deleted": l.is_deleted
     } for l in leads]), 200
 
-
 @bp.route('/leads/<int:id>', methods=['DELETE'])
 @jwt_required()
 def delete_lead(id):
@@ -366,9 +296,10 @@ def delete_lead(id):
     lead = Lead.query.filter_by(id=id, clinic_id=clinic_id).first_or_404()
 
     try:
+        # Soft Delete
         lead.is_deleted = True
         lead.deleted_at = datetime.utcnow()
-
+        
         db.session.commit()
         return jsonify({"success": True, "message": "Lead excluído com sucesso"}), 200
 
@@ -376,7 +307,6 @@ def delete_lead(id):
         db.session.rollback()
         logger.exception(f"Erro ao excluir lead {id}: {e}")
         return jsonify({"error": "Falha ao excluir lead"}), 500
-
 
 @bp.route('/leads/<int:id>/restore', methods=['POST'])
 @jwt_required()

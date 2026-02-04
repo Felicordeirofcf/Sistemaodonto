@@ -11,25 +11,14 @@ class Clinic(db.Model):
     name = db.Column(db.String(100), nullable=False)
     cnpj_cpf = db.Column(db.String(20), unique=True)
 
-    whatsapp_number = db.Column(db.String(20), nullable=True)
+    # ✅ CAMPO ESSENCIAL: Número oficial para redirecionamento (Ex: 5521987708652)
+    whatsapp_number = db.Column(db.String(20), nullable=True) 
 
-    
-
-    # 🤖 Configuração do Chatbot/IA (editável por clínica)
-    ai_receptionist_prompt = db.Column(db.Text, nullable=True)
-    services_catalog = db.Column(db.JSON, nullable=False, default=dict)  # ex: {"botox": {"desc": "...", "duracao_min": 30}}
-plan_type = db.Column(db.String(20), default="Bronze")
+    plan_type = db.Column(db.String(20), default="Bronze")
     max_dentists = db.Column(db.Integer, default=1)
     is_active = db.Column(db.Boolean, default=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    # ✅ NOVO (SaaS): Configuração de tom/prompt do chatbot por clínica
-    chatbot_prompt = db.Column(db.Text, nullable=True)
-
-    # ✅ NOVO (SaaS): Catálogo de procedimentos editável (descrições)
-    # Ex: {"resina": {"title":"Aplicação de resina", "about":"...", "duration_min": 30}, ...}
-    procedures_catalog = db.Column(db.JSON, nullable=True)
 
     # Relacionamentos Core
     users = db.relationship("User", backref="clinic", lazy=True)
@@ -100,7 +89,7 @@ class Patient(db.Model):
     odontogram_data = db.Column(db.JSON, nullable=True)
     last_visit = db.Column(db.DateTime, default=datetime.utcnow)
 
-    receive_marketing = db.Column(db.Boolean, default=True)
+    receive_marketing = db.Column(db.Boolean, default=True) 
 
     clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -129,10 +118,10 @@ class InventoryItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
     name = db.Column(db.String(100), nullable=False)
-    category = db.Column(db.String(50), default="Material")
+    category = db.Column(db.String(50), default="Material") 
     quantity = db.Column(db.Float, default=0.0)
-    min_quantity = db.Column(db.Float, default=5.0)
-    purchase_price = db.Column(db.Float, default=0.0)
+    min_quantity = db.Column(db.Float, default=5.0) 
+    purchase_price = db.Column(db.Float, default=0.0) 
     unit = db.Column(db.String(20), default="unidade")
 
     clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=False)
@@ -145,25 +134,26 @@ class Appointment(db.Model):
     __tablename__ = "appointments"
     id = db.Column(db.Integer, primary_key=True)
 
-    clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=False, index=True)
-    patient_id = db.Column(db.Integer, db.ForeignKey("patients.id"), nullable=True, index=True)
-    lead_id = db.Column(db.Integer, db.ForeignKey("marketing_leads.id"), nullable=True, index=True)
+    clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=False)
+    patient_id = db.Column(db.Integer, db.ForeignKey("patients.id"), nullable=True)
+    lead_id = db.Column(db.Integer, db.ForeignKey("marketing_leads.id"), nullable=True)
 
     title = db.Column(db.String(100))
     description = db.Column(db.Text)
-
-    start_datetime = db.Column(db.DateTime, nullable=False, index=True)
-    end_datetime = db.Column(db.DateTime, nullable=False, index=True)
-
-    status = db.Column(db.String(20), default="scheduled")  # scheduled|confirmed|done|cancelled
-
+    
+    start_datetime = db.Column(db.DateTime, nullable=False)
+    end_datetime = db.Column(db.DateTime, nullable=False)
+    
+    status = db.Column(db.String(20), default="scheduled") # scheduled|confirmed|done|cancelled
+    
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Back-compatibility fields (optional, but keeping for safety if used elsewhere)
     @property
     def date_time(self):
         return self.start_datetime
-
+    
     @property
     def patient_name(self):
         if self.patient:
@@ -208,13 +198,14 @@ class WhatsAppConnection(db.Model):
     __tablename__ = "whatsapp_connections"
     id = db.Column(db.Integer, primary_key=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=False, index=True)
-
-    instance_name = db.Column(db.String(50), unique=True, index=True)
-
+    
+    # ✅ CAMPO ADICIONADO: Nome da instância (Ex: clinica_v3_1)
+    instance_name = db.Column(db.String(50), unique=True, index=True) 
+    
     provider = db.Column(db.String(20), nullable=False, default="qr")
     status = db.Column(db.String(20), nullable=False, default="disconnected")
     session_data = db.Column(db.JSON, nullable=True)
-
+    
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -263,20 +254,19 @@ class ScheduledMessage(db.Model):
     contact = db.relationship("WhatsAppContact", backref=db.backref("scheduled", lazy=True))
 
 
+# ✅ NOVA TABELA: Sessões de Chat para Máquina de Estados
 class ChatSession(db.Model):
     __tablename__ = "chat_sessions"
     id = db.Column(db.Integer, primary_key=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=False, index=True)
-    sender_id = db.Column(db.String(100), nullable=False, index=True)  # JID ou Phone
-
+    sender_id = db.Column(db.String(100), nullable=False, index=True) # JID ou Phone
+    
     state = db.Column(db.String(50), default='start')
-
-    # ✅ IMPORTANTÍSSIMO: não usar default=dict em JSON mutável
-    data = db.Column(db.JSON, default=dict)
-
+    data = db.Column(db.JSON, default={})
+    
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
+    
     __table_args__ = (
         db.UniqueConstraint("clinic_id", "sender_id", name="uq_chat_session_clinic_sender"),
     )
@@ -311,18 +301,19 @@ class CRMCard(db.Model):
     __tablename__ = 'crm_cards'
     id = db.Column(db.Integer, primary_key=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
-
+    
+    # ✅ CAMPOS ESSENCIAIS PARA LEADS DO WHATSAPP
     paciente_id = db.Column(db.Integer, db.ForeignKey('patients.id'), nullable=True)
-    paciente_nome = db.Column(db.String(100))
-    paciente_phone = db.Column(db.String(30))
-
+    paciente_nome = db.Column(db.String(100)) 
+    paciente_phone = db.Column(db.String(30)) 
+    
     stage_id = db.Column(db.Integer, db.ForeignKey('crm_stages.id'))
-    historico_conversas = db.Column(db.Text)
+    historico_conversas = db.Column(db.Text) 
     valor_proposta = db.Column(db.Float, default=0.0)
-
+    
     ultima_interacao = db.Column(db.DateTime, default=datetime.utcnow)
-    status = db.Column(db.String(20), default='open')  # open, won, lost
-
+    status = db.Column(db.String(20), default='open') # open, won, lost
+    
     history = db.relationship("CRMHistory", backref="card", lazy=True)
     stage = db.relationship("CRMStage", backref="cards", lazy=True)
 
@@ -347,23 +338,22 @@ class LeadStatus:
     CONVERTED = 'convertido'
     LOST = 'perdido'
 
-
 class Campaign(db.Model):
     __tablename__ = 'marketing_campaigns'
-
+    
     id = db.Column(db.Integer, primary_key=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False, index=True)
-
+    
     name = db.Column(db.String(100), nullable=False)
     slug = db.Column(db.String(50), unique=True, index=True)
     tracking_code = db.Column(db.String(20), unique=True, index=True)
-
+    
     whatsapp_message_template = db.Column(db.Text)
     landing_page_data = db.Column(db.JSON)
-
+    
     clicks_count = db.Column(db.Integer, default=0)
     leads_count = db.Column(db.Integer, default=0)
-
+    
     active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -372,22 +362,20 @@ class Campaign(db.Model):
 
 class Lead(db.Model):
     __tablename__ = 'marketing_leads'
-
+    
     id = db.Column(db.Integer, primary_key=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False, index=True)
     campaign_id = db.Column(db.Integer, db.ForeignKey('marketing_campaigns.id'), nullable=True)
-
+    
     name = db.Column(db.String(100), nullable=True)
     phone = db.Column(db.String(30), nullable=False, index=True)
-
+    
     status = db.Column(db.String(20), default=LeadStatus.NEW)
     source = db.Column(db.String(50))
-
-    chatbot_state = db.Column(db.String(50), default='START')
-
-    # ✅ IMPORTANTÍSSIMO: não usar default=dict em JSON mutável
-    chatbot_data = db.Column(db.JSON, default=dict)
-
+    
+    chatbot_state = db.Column(db.String(50), default='START') 
+    chatbot_data = db.Column(db.JSON, default={})
+    
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -398,11 +386,11 @@ class Lead(db.Model):
 
 class LeadEvent(db.Model):
     __tablename__ = 'marketing_lead_events'
-
+    
     id = db.Column(db.Integer, primary_key=True)
     lead_id = db.Column(db.Integer, db.ForeignKey('marketing_leads.id'), nullable=True)
     campaign_id = db.Column(db.Integer, db.ForeignKey('marketing_campaigns.id'), nullable=True)
-
-    event_type = db.Column(db.String(50))  # 'click', 'msg_in', 'status_change'
+    
+    event_type = db.Column(db.String(50)) # 'click', 'msg_in', 'status_change'
     metadata_json = db.Column(db.JSON)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
