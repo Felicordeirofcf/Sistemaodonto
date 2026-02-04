@@ -29,6 +29,15 @@ def init_db():
                 
                 # Clinic
                 "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(20);",
+
+                # ✅ Clinic IA / Atendimento
+                "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_enabled BOOLEAN DEFAULT TRUE;",
+                "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_model VARCHAR(40) DEFAULT 'gpt-4o-mini';",
+                "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_temperature FLOAT DEFAULT 0.4;",
+                "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_system_prompt TEXT;",
+                # Postgres prefere JSONB; se falhar (ex: sqlite), cai no except e segue.
+                "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_procedures JSONB;",
+                "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_booking_policy TEXT;",
                 
                 # Appointments (Migration to new structure)
                 "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS lead_id INTEGER;",

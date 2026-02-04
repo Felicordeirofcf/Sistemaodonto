@@ -5,7 +5,7 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 import os
 import logging
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 
 # Configuração de Logs
 logging.basicConfig(level=logging.INFO)
@@ -66,6 +66,46 @@ def create_app():
                 logger.info("✅ Banco de dados criado/atualizado com sucesso.")
         except Exception as e:
             logger.warning(f"⚠️ Aviso ao verificar banco: {e}")
+
+        # ✅ Hotfix de schema para Postgres em produção (Render):
+        # create_all() NÃO altera tabelas já existentes. Se você adicionou colunas no model,
+        # o Postgres fica sem elas e o sistema quebra (ex: clinics.ai_enabled).
+        try:
+            if db.engine.dialect.name == "postgresql":
+                schema_fixes = [
+                    # Clinics: IA / Atendimento
+                    "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(20);",
+                    "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_enabled BOOLEAN DEFAULT TRUE;",
+                    "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_model VARCHAR(40) DEFAULT 'gpt-4o-mini';",
+                    "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_temperature FLOAT DEFAULT 0.4;",
+                    "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_system_prompt TEXT;",
+                    "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_procedures JSONB;",
+                    "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_booking_policy TEXT;",
+
+                    # Chat sessions (máquina de estados)
+                    """
+                    CREATE TABLE IF NOT EXISTS chat_sessions (
+                        id SERIAL PRIMARY KEY,
+                        clinic_id INTEGER NOT NULL REFERENCES clinics(id),
+                        sender_id VARCHAR(100) NOT NULL,
+                        state VARCHAR(50) DEFAULT 'start',
+                        data JSONB DEFAULT '{}'::jsonb,
+                        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(clinic_id, sender_id)
+                    );
+                    """,
+                ]
+
+                for stmt in schema_fixes:
+                    try:
+                        db.session.execute(text(stmt))
+                        db.session.commit()
+                    except Exception as e:
+                        db.session.rollback()
+                        logger.warning(f"⚠️ Schema fix falhou: {e}")
+        except Exception as e:
+            logger.warning(f"⚠️ Aviso schema fix: {e}")
 
     # --- REGISTRO DE BLUEPRINTS ---
     from .routes.auth_routes import auth_bp

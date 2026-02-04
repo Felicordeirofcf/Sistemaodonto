@@ -1,6 +1,9 @@
 from . import db
 from datetime import datetime
 
+# ✅ Rastreia mudanças em colunas JSON (evita perder chaves por mutação in-place)
+from sqlalchemy.ext.mutable import MutableDict
+
 # =========================================================
 # 1) CLÍNICA (CLIENTE SAAS)
 # =========================================================
@@ -20,8 +23,10 @@ class Clinic(db.Model):
     # ✅ Campos opcionais para SaaS (customizáveis por clínica)
     ai_enabled = db.Column(db.Boolean, default=True)
     ai_model = db.Column(db.String(40), default="gpt-4o-mini")
+    ai_temperature = db.Column(db.Float, default=0.4)
     ai_system_prompt = db.Column(db.Text, nullable=True)
     ai_procedures = db.Column(db.JSON, nullable=True)  # {"limpeza": {"desc": "...", "dur": 30}, ...}
+    ai_booking_policy = db.Column(db.Text, nullable=True)
 
     plan_type = db.Column(db.String(20), default="Bronze")
     max_dentists = db.Column(db.Integer, default=1)
@@ -271,7 +276,8 @@ class ChatSession(db.Model):
     sender_id = db.Column(db.String(100), nullable=False, index=True) # JID ou Phone
     
     state = db.Column(db.String(50), default='start')
-    data = db.Column(db.JSON, default={})
+    # ✅ MutableDict garante que alterações em dict/list sejam persistidas corretamente
+    data = db.Column(MutableDict.as_mutable(db.JSON), default=dict)
     
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

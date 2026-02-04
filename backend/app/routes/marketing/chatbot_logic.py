@@ -89,16 +89,18 @@ def _get_clinic_ai_config(clinic_id: int):
             "clinic_name": "",
         }
 
+    # ⚠️ em bancos desatualizados, alguns campos podem não existir ainda.
     enabled = bool(getattr(clinic, "ai_enabled", True))
     model = (getattr(clinic, "ai_model", None) or DEFAULT_OPENAI_MODEL).strip()
     temperature = float(getattr(clinic, "ai_temperature", None) or DEFAULT_TEMPERATURE)
     system_prompt = (getattr(clinic, "ai_system_prompt", None) or DEFAULT_SYSTEM_PROMPT).strip()
 
-    procs = getattr(clinic, "ai_procedures_json", None)
-    if isinstance(procs, dict) and procs:
-        procedures = procs
-    else:
-        procedures = DEFAULT_PROCEDURES
+    # Compatibilidade: já existiram nomes diferentes.
+    procs = getattr(clinic, "ai_procedures", None)
+    if not isinstance(procs, dict) or not procs:
+        procs = getattr(clinic, "ai_procedures_json", None)
+
+    procedures = procs if isinstance(procs, dict) and procs else DEFAULT_PROCEDURES
 
     return {
         "enabled": enabled,
@@ -211,12 +213,18 @@ def process_chatbot_message(clinic_id, sender_id, message_text, push_name):
     session = get_or_create_session(clinic_id, sender_id)
     state = session.state
     data = session.data or {}
+    if not isinstance(data, dict):
+        data = {}
 
     logger.info(f"[{trace_id}] Chatbot: clinic={clinic_id} sender={sender_id} state={state} msg={message_text}")
 
     # Normalização básica
-    text = (message_text or "").strip().lower()
+    original_text = (message_text or "").strip()
+    text = original_text.lower()
     reply = None
+
+    # ✅ salva histórico do usuário (para a IA responder com contexto)
+    _append_history(data, "user", original_text)
 
     # ✅ qualquer momento: se o cliente pedir remarcar, entra no fluxo de remarcação
     if _wants_reschedule(text):
@@ -285,18 +293,26 @@ def process_chatbot_message(clinic_id, sender_id, message_text, push_name):
 
     elif state == STATE_AWAITING_CONFIRM:
         if _is_yes(text):
-            result = create_real_appointment(clinic_id, sender_id, data, push_name)
-            if result.get("ok"):
-                session.state = STATE_DONE
-                reply = result.get("message") or "Agendamento realizado com sucesso! Te esperamos lá. 😊"
+            # ✅ proteção: evita 500 por falta de chaves no JSON
+            if not data.get("date"):
+                session.state = STATE_AWAITING_DATE
+                reply = "Perfeito 😊 Só me diga a *data* do agendamento (ex: 10/02, amanhã, quinta)."
+            elif not data.get("time"):
+                session.state = STATE_AWAITING_TIME
+                reply = "Perfeito 😊 Só me diga o *horário* (ex: 10h, 15:30)."
             else:
-                if result.get("reason") == "conflict" and result.get("alternatives"):
-                    # mantém a data e pede novo horário
-                    data.pop("time", None)
-                    session.state = STATE_AWAITING_TIME
-                    reply = result.get("message")
+                result = create_real_appointment(clinic_id, sender_id, data, push_name)
+                if result.get("ok"):
+                    session.state = STATE_DONE
+                    reply = result.get("message") or "Agendamento realizado com sucesso! Te esperamos lá. 😊"
                 else:
-                    reply = result.get("message") or "Houve um erro ao salvar seu agendamento no sistema. Um atendente humano falará com você em breve."
+                    if result.get("reason") == "conflict" and result.get("alternatives"):
+                        # mantém a data e pede novo horário
+                        data.pop("time", None)
+                        session.state = STATE_AWAITING_TIME
+                        reply = result.get("message")
+                    else:
+                        reply = result.get("message") or "Houve um erro ao salvar seu agendamento no sistema. Um atendente humano falará com você em breve."
         elif _is_no(text):
             session.state = STATE_START
             data = {}
@@ -344,18 +360,26 @@ def process_chatbot_message(clinic_id, sender_id, message_text, push_name):
 
     elif state == STATE_RESCHEDULE_AWAITING_CONFIRM:
         if _is_yes(text):
-            appt_id = data.get('reschedule_appointment_id')
-            result = reschedule_real_appointment(clinic_id, sender_id, appt_id, data, push_name)
-            if result.get("ok"):
-                session.state = STATE_DONE
-                reply = result.get("message") or "Remarcação realizada com sucesso! 😊"
+            # ✅ proteção: evita 500 por falta de chaves no JSON
+            if not data.get("date"):
+                session.state = STATE_RESCHEDULE_AWAITING_DATE
+                reply = "Perfeito 😊 Só me diga a *data* para remarcar (ex: 10/02, amanhã, quinta)."
+            elif not data.get("time"):
+                session.state = STATE_RESCHEDULE_AWAITING_TIME
+                reply = "Perfeito 😊 Só me diga o *horário* para remarcar (ex: 10h, 15:30)."
             else:
-                if result.get("reason") == "conflict" and result.get("alternatives"):
-                    data.pop("time", None)
-                    session.state = STATE_RESCHEDULE_AWAITING_TIME
-                    reply = result.get("message")
+                appt_id = data.get('reschedule_appointment_id')
+                result = reschedule_real_appointment(clinic_id, sender_id, appt_id, data, push_name)
+                if result.get("ok"):
+                    session.state = STATE_DONE
+                    reply = result.get("message") or "Remarcação realizada com sucesso! 😊"
                 else:
-                    reply = result.get("message") or "Não consegui remarcar agora. Um atendente humano falará com você em breve."
+                    if result.get("reason") == "conflict" and result.get("alternatives"):
+                        data.pop("time", None)
+                        session.state = STATE_RESCHEDULE_AWAITING_TIME
+                        reply = result.get("message")
+                    else:
+                        reply = result.get("message") or "Não consegui remarcar agora. Um atendente humano falará com você em breve."
         elif _is_no(text):
             session.state = STATE_START
             data = {}
@@ -367,6 +391,7 @@ def process_chatbot_message(clinic_id, sender_id, message_text, push_name):
     db.session.commit()
 
     if reply:
+        _append_history(data, "assistant", reply)
         _send_whatsapp_reply(clinic_id, sender_id, reply)
 
 
@@ -515,9 +540,28 @@ def _suggest_next_slots(clinic_id: int, day: datetime, duration_min: int = 30, l
     return slots
 
 
+def _format_alternatives(alts: list) -> str:
+    """Gera texto com sugestões de horários (labels)."""
+    try:
+        labels = [a.get("label") for a in (alts or []) if isinstance(a, dict) and a.get("label")]
+        if not labels:
+            return ""
+        return " Sugestões: " + ", ".join(labels) + "."
+    except Exception:
+        return ""
+
+
 def create_real_appointment(clinic_id, sender_id, data, push_name):
     """Cria agendamento e retorna dict: {ok, reason?, message?, alternatives?}"""
     try:
+        # ✅ validação defensiva (evita KeyError e 500)
+        if not isinstance(data, dict):
+            return {"ok": False, "reason": "invalid_data", "message": "Tive um problema ao ler seus dados. Vamos tentar de novo: qual *data* você prefere?"}
+        if not data.get("date"):
+            return {"ok": False, "reason": "missing_date", "message": "Qual *data* você prefere? (ex: 10/02, amanhã, quinta)"}
+        if not data.get("time"):
+            return {"ok": False, "reason": "missing_time", "message": "Qual *horário* você prefere? (ex: 10h, 15:30)"}
+
         patient = Patient.query.filter_by(clinic_id=clinic_id, phone=sender_id).first()
         lead = Lead.query.filter_by(clinic_id=clinic_id, phone=sender_id).first()
 
@@ -527,14 +571,15 @@ def create_real_appointment(clinic_id, sender_id, data, push_name):
         conflict = _find_conflict(clinic_id, start_dt, end_dt)
         if conflict:
             alternatives = _suggest_next_slots(clinic_id, start_dt, duration_min, limit=3)
+            alt_list = [
+                {"start": s.strftime('%Y-%m-%d %H:%M'), "label": s.strftime('%H:%M')}
+                for s, _ in alternatives
+            ]
             return {
                 "ok": False,
                 "reason": "conflict",
-                "message": "Esse horário já está ocupado.",
-                "alternatives": [
-                    {"start": s.strftime('%Y-%m-%d %H:%M'), "label": s.strftime('%H:%M')}
-                    for s, _ in alternatives
-                ],
+                "message": "Esse horário já está ocupado." + _format_alternatives(alt_list) + " Qual horário você prefere?",
+                "alternatives": alt_list,
             }
 
         new_app = Appointment(
@@ -565,7 +610,7 @@ def create_real_appointment(clinic_id, sender_id, data, push_name):
             f"TRACE_LOG: lead_id={lead.id if lead else 'N/A'} appointment_id={new_app.id} "
             f"start={start_dt.isoformat()} end={end_dt.isoformat()}"
         )
-        return {"ok": True, "appointment_id": new_app.id}
+        return {"ok": True, "appointment_id": new_app.id, "message": f"Agendamento confirmado ✅ {start_dt.strftime('%d/%m')} às {start_dt.strftime('%H:%M')}. Te esperamos! 😊"}
 
     except Exception as e:
         logger.error(f"Erro ao criar agendamento: {e}", exc_info=True)
@@ -578,6 +623,14 @@ def reschedule_real_appointment(clinic_id, sender_id, appointment_id, data, push
         if not appointment_id:
             return {"ok": False, "reason": "missing_id"}
 
+        # ✅ validação defensiva
+        if not isinstance(data, dict):
+            return {"ok": False, "reason": "invalid_data", "message": "Tive um problema ao ler seus dados. Vamos tentar de novo: qual *data* você prefere?"}
+        if not data.get("date"):
+            return {"ok": False, "reason": "missing_date", "message": "Qual *data* você prefere para remarcar? (ex: 10/02, amanhã, quinta)"}
+        if not data.get("time"):
+            return {"ok": False, "reason": "missing_time", "message": "Qual *horário* você prefere para remarcar? (ex: 10h, 15:30)"}
+
         appt = Appointment.query.filter_by(clinic_id=clinic_id, id=appointment_id).first()
         if not appt:
             return {"ok": False, "reason": "not_found"}
@@ -588,14 +641,15 @@ def reschedule_real_appointment(clinic_id, sender_id, appointment_id, data, push
         conflict = _find_conflict(clinic_id, start_dt, end_dt, exclude_appointment_id=appt.id)
         if conflict:
             alternatives = _suggest_next_slots(clinic_id, start_dt, duration_min, limit=3)
+            alt_list = [
+                {"start": s.strftime('%Y-%m-%d %H:%M'), "label": s.strftime('%H:%M')}
+                for s, _ in alternatives
+            ]
             return {
                 "ok": False,
                 "reason": "conflict",
-                "message": "Esse horário já está ocupado.",
-                "alternatives": [
-                    {"start": s.strftime('%Y-%m-%d %H:%M'), "label": s.strftime('%H:%M')}
-                    for s, _ in alternatives
-                ],
+                "message": "Esse horário já está ocupado." + _format_alternatives(alt_list) + " Qual horário você prefere?",
+                "alternatives": alt_list,
             }
 
         appt.start_datetime = start_dt
@@ -605,7 +659,7 @@ def reschedule_real_appointment(clinic_id, sender_id, appointment_id, data, push
 
         db.session.commit()
         logger.info(f"TRACE_LOG_RESCHEDULE: appointment_id={appt.id} new_start={start_dt.isoformat()}")
-        return {"ok": True, "appointment_id": appt.id}
+        return {"ok": True, "appointment_id": appt.id, "message": f"Remarcação confirmada ✅ {start_dt.strftime('%d/%m')} às {start_dt.strftime('%H:%M')}."}
 
     except Exception as e:
         logger.error(f"Erro ao remarcar agendamento: {e}", exc_info=True)
