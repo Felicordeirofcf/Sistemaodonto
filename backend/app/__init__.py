@@ -53,17 +53,30 @@ def create_app():
         from .models import (
             Clinic, User, Patient, InventoryItem, Appointment, Transaction,
             WhatsAppConnection, WhatsAppContact, MessageLog, ScheduledMessage,
+            ChatSession,  # ✅ IMPORTADO (evita “relation chat_sessions does not exist”)
             AutomacaoRecall, CRMStage, CRMCard, CRMHistory,
-            # ✅ NOVOS MODELS DE MARKETING
+            # ✅ MODELS DE MARKETING
             Campaign, Lead, LeadEvent
         )
 
-        # Cria as tabelas se não existirem (Segurança para SQLite/Dev)
+        # Cria as tabelas se faltar alguma tabela essencial (robusto p/ Render/Dev)
         try:
             inspector = inspect(db.engine)
-            if not inspector.has_table("users"):
+
+            required_tables = [
+                "users",
+                "appointments",
+                "chat_sessions",
+                "crm_cards",
+                "marketing_leads",
+            ]
+
+            missing = [t for t in required_tables if not inspector.has_table(t)]
+            if missing:
                 db.create_all()
-                logger.info("✅ Banco de dados criado/atualizado com sucesso.")
+                logger.info(f"✅ db.create_all executado. Tabelas ausentes criadas: {missing}")
+            else:
+                logger.info("✅ Banco OK. Nenhuma tabela essencial faltando.")
         except Exception as e:
             logger.warning(f"⚠️ Aviso ao verificar banco: {e}")
 
@@ -107,7 +120,7 @@ def create_app():
     # 2. Registra na RAIZ para o link curto funcionar (ex: /c/xyz12)
     app.register_blueprint(campaigns_bp, name="campaigns_public", url_prefix="")
 
-    # ✅ [NOVO] Webhook do WhatsApp (Adicione ISTO para o bot responder)
+    # ✅ Webhook do WhatsApp (bot responder)
     from .routes.marketing.webhook import bp as webhook_bp
     app.register_blueprint(webhook_bp, url_prefix="/api/marketing")
 
@@ -161,7 +174,7 @@ def create_app():
 
                 p1 = Patient(
                     name="Carlos Eduardo",
-                    phone="5521999999999", 
+                    phone="5521999999999",
                     last_visit=datetime.utcnow() - timedelta(days=240),
                     clinic_id=demo_clinic.id,
                 )
@@ -181,7 +194,7 @@ def create_app():
     def fix_tables():
         try:
             from sqlalchemy import text
-            
+
             # 1. Cria tabela AutomacaoRecall
             sql_recall = text("""
                 CREATE TABLE IF NOT EXISTS automacoes_recall (
@@ -194,7 +207,7 @@ def create_app():
                     ativo BOOLEAN DEFAULT TRUE
                 );
             """)
-            
+
             # 2. Cria tabela CRMStage
             sql_stage = text("""
                 CREATE TABLE IF NOT EXISTS crm_stages (
@@ -208,7 +221,7 @@ def create_app():
                 );
             """)
 
-            # 3. Cria tabela CRMCard
+            # 3. Cria tabela CRMCard (estrutura mínima — o restante depende de migrations)
             sql_card = text("""
                 CREATE TABLE IF NOT EXISTS crm_cards (
                     id SERIAL PRIMARY KEY,
@@ -225,51 +238,67 @@ def create_app():
                 ALTER TABLE patients ADD COLUMN IF NOT EXISTS receive_marketing BOOLEAN DEFAULT TRUE;
             """)
 
-            # 5. [NOVO] Tabelas de Marketing (Campanhas, Leads, Eventos)
+            # 5. Tabelas de Marketing (Campanhas, Leads, Eventos)
             sql_marketing = text("""
                 CREATE TABLE IF NOT EXISTS marketing_campaigns (
-                    id SERIAL PRIMARY KEY, clinic_id INTEGER NOT NULL, name VARCHAR(100), slug VARCHAR(50), 
-                    tracking_code VARCHAR(20), whatsapp_message_template TEXT, landing_page_data JSON, 
-                    clicks_count INTEGER DEFAULT 0, leads_count INTEGER DEFAULT 0, active BOOLEAN DEFAULT TRUE, 
+                    id SERIAL PRIMARY KEY, clinic_id INTEGER NOT NULL, name VARCHAR(100), slug VARCHAR(50),
+                    tracking_code VARCHAR(20), whatsapp_message_template TEXT, landing_page_data JSON,
+                    clicks_count INTEGER DEFAULT 0, leads_count INTEGER DEFAULT 0, active BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
                 );
                 CREATE TABLE IF NOT EXISTS marketing_leads (
-                    id SERIAL PRIMARY KEY, clinic_id INTEGER NOT NULL, campaign_id INTEGER, name VARCHAR(100), 
-                    phone VARCHAR(30), status VARCHAR(20) DEFAULT 'novo', source VARCHAR(50), 
-                    chatbot_state VARCHAR(50) DEFAULT 'START', chatbot_data JSON DEFAULT '{}', 
+                    id SERIAL PRIMARY KEY, clinic_id INTEGER NOT NULL, campaign_id INTEGER, name VARCHAR(100),
+                    phone VARCHAR(30), status VARCHAR(20) DEFAULT 'novo', source VARCHAR(50),
+                    chatbot_state VARCHAR(50) DEFAULT 'START', chatbot_data JSON DEFAULT '{}',
                     created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(), updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
                     is_deleted BOOLEAN DEFAULT FALSE, deleted_at TIMESTAMP WITHOUT TIME ZONE
                 );
-                -- Garantir que as colunas existam caso a tabela já tenha sido criada
                 ALTER TABLE marketing_leads ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;
                 ALTER TABLE marketing_leads ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITHOUT TIME ZONE;
                 CREATE INDEX IF NOT EXISTS idx_leads_clinic_deleted ON marketing_leads (clinic_id, is_deleted);
+
                 CREATE TABLE IF NOT EXISTS marketing_lead_events (
-                    id SERIAL PRIMARY KEY, lead_id INTEGER, campaign_id INTEGER, event_type VARCHAR(50), 
+                    id SERIAL PRIMARY KEY, lead_id INTEGER, campaign_id INTEGER, event_type VARCHAR(50),
                     metadata_json JSON, created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
                 );
+            """)
+
+            # ✅ 6. Chat Sessions (evita erro do chatbot)
+            sql_chat = text("""
+                CREATE TABLE IF NOT EXISTS chat_sessions (
+                    id SERIAL PRIMARY KEY,
+                    clinic_id INTEGER NOT NULL,
+                    sender_id VARCHAR(100) NOT NULL,
+                    state VARCHAR(50) DEFAULT 'start',
+                    data JSON DEFAULT '{}',
+                    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_session_clinic_sender
+                ON chat_sessions (clinic_id, sender_id);
             """)
 
             db.session.execute(sql_recall)
             db.session.execute(sql_stage)
             db.session.execute(sql_card)
             db.session.execute(sql_coluna)
-            db.session.execute(sql_marketing) # Executa as novas
+            db.session.execute(sql_marketing)
+            db.session.execute(sql_chat)
             db.session.commit()
-            
+
             return jsonify({"message": "Tabelas recriadas via SQL com sucesso!"}), 200
         except Exception as e:
             db.session.rollback()
             return jsonify({"error": str(e)}), 500
 
     # --- HANDLER GLOBAL DE ERROS (JSON) ---
-    from werkzeug.exceptions import HTTPException, NotFound
+    from werkzeug.exceptions import HTTPException
 
     @app.errorhandler(HTTPException)
     def handle_http_exception(e):
         """Retorna JSON para erros HTTP (404, 405, etc) sem log crítico."""
         code = e.code
-        
+
         # Se a rota for API ou Auth, retorna JSON consistente
         if request.path.startswith("/api") or request.path.startswith("/auth"):
             return jsonify({
@@ -277,23 +306,21 @@ def create_app():
                 "message": e.description,
                 "code": code
             }), code
-        
+
         # Fallback para o index.html (SPA) em caso de 404 em rotas não-API
         if code == 404:
             return app.send_static_file("index.html")
-            
+
         return jsonify({"error": True, "message": e.description}), code
 
     @app.errorhandler(Exception)
     def handle_exception(e):
         """Loga erros internos (500) com traceback e retorna JSON."""
-        # Se por algum motivo uma HTTPException cair aqui, delega para o handler correto
         if isinstance(e, HTTPException):
             return handle_http_exception(e)
 
-        # Log crítico apenas para erros reais do servidor
         logger.error(f"🔥 ERRO INTERNO: {str(e)}", exc_info=True)
-        
+
         return jsonify({
             "error": True,
             "message": "Erro interno do servidor",
