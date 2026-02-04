@@ -100,6 +100,10 @@ def create_app():
     from .routes.marketing.automations import bp as automations_bp
     app.register_blueprint(automations_bp, url_prefix="/api/marketing")
 
+    # ✅ [NOVO] Configurações de IA (ChatGPT) por clínica
+    from .routes.marketing.ai_settings import bp as marketing_ai_bp
+    app.register_blueprint(marketing_ai_bp, url_prefix="/api/marketing")
+
     # ✅ Campanhas e Leads (Gestão + Links Públicos)
     from .routes.marketing.campaigns import bp as campaigns_bp
     # 1. Registra para API de gestão (ex: /api/marketing/campaigns)
@@ -225,6 +229,16 @@ def create_app():
                 ALTER TABLE patients ADD COLUMN IF NOT EXISTS receive_marketing BOOLEAN DEFAULT TRUE;
             """)
 
+            # 4.1) ✅ Campos de IA (ChatGPT) por clínica
+            # (Postgres: ADD COLUMN IF NOT EXISTS funciona; se a coluna já existir, ignora)
+            sql_clinic_ai = text("""
+                ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_enabled BOOLEAN DEFAULT TRUE;
+                ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_model VARCHAR(50) DEFAULT 'gpt-4o-mini';
+                ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_temperature FLOAT DEFAULT 0.4;
+                ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_system_prompt TEXT;
+                ALTER TABLE clinics ADD COLUMN IF NOT EXISTS ai_procedures JSON;
+            """)
+
             # 5. [NOVO] Tabelas de Marketing (Campanhas, Leads, Eventos)
             sql_marketing = text("""
                 CREATE TABLE IF NOT EXISTS marketing_campaigns (
@@ -254,6 +268,7 @@ def create_app():
             db.session.execute(sql_stage)
             db.session.execute(sql_card)
             db.session.execute(sql_coluna)
+            db.session.execute(sql_clinic_ai)
             db.session.execute(sql_marketing) # Executa as novas
             db.session.commit()
             

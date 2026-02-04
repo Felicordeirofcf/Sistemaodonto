@@ -29,6 +29,8 @@
 | `JWT_SECRET_KEY` | Chave de segurança | `sua-chave-secreta` |
 | `WHATSAPP_QR_SERVICE_URL` | URL da Evolution API | `https://sua-evolution-api.com` |
 | `EVOLUTION_API_KEY` | API Key da Evolution | `429683C4C977415CAAF6...` |
+| `OPENAI_API_KEY` | Chave OpenAI (atendimento ChatGPT) | `sk-...` |
+| `OPENAI_MODEL` | Modelo (opcional) | `gpt-4o-mini` |
 
 ### 2. Comandos de Build
 - **Build Command**: `./render-build.sh`

@@ -44,7 +44,16 @@ def _safe_iso_datetime(value: str):
     try:
         return datetime.fromisoformat(value)
     except Exception:
-        return None
+        pass
+
+    # ✅ fallback: "YYYY-MM-DD HH:MM" or "YYYY-MM-DD HH:MM:SS" (sem timezone)
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(value, fmt)
+        except Exception:
+            continue
+
+    return None
 
 
 def _appt_to_dict(appt: Appointment, include_relations: bool = False):
@@ -168,12 +177,25 @@ def create_appointment():
     end_dt = _safe_iso_datetime(end_raw)
 
     if not end_dt:
-        # Default duration 1h (ou duration enviado)
-        try:
-            duration_h = float(data.get('duration', 1))
-        except Exception:
-            duration_h = 1.0
-        end_dt = start_dt + timedelta(hours=duration_h)
+        # ✅ duration robusto: aceita minutos ou horas
+        raw = data.get('duration_minutes', None)
+        if raw is None:
+            raw = data.get('duration', None)
+
+        # default 30min
+        minutes = 30
+        if raw not in (None, "", 0):
+            try:
+                val = float(raw)
+                # heurística: se vier >= 15 => minutes; se vier <= 8 => hours
+                if val >= 15:
+                    minutes = int(val)
+                else:
+                    minutes = int(val * 60)
+            except Exception:
+                minutes = 30
+
+        end_dt = start_dt + timedelta(minutes=minutes)
 
     # ids
     patient_id = data.get("patient_id")

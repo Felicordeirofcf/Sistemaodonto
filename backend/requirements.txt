@@ -54,3 +54,4 @@ APScheduler
 requests
 shortuuid
 qrcode[pil]
+openai>=1.40.0

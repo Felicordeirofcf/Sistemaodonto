@@ -14,6 +14,15 @@ class Clinic(db.Model):
     # ✅ CAMPO ESSENCIAL: Número oficial para redirecionamento (Ex: 5521987708652)
     whatsapp_number = db.Column(db.String(20), nullable=True) 
 
+    # ===============================
+    # IA / Atendimento (ChatGPT)
+    # ===============================
+    # ✅ Campos opcionais para SaaS (customizáveis por clínica)
+    ai_enabled = db.Column(db.Boolean, default=True)
+    ai_model = db.Column(db.String(40), default="gpt-4o-mini")
+    ai_system_prompt = db.Column(db.Text, nullable=True)
+    ai_procedures = db.Column(db.JSON, nullable=True)  # {"limpeza": {"desc": "...", "dur": 30}, ...}
+
     plan_type = db.Column(db.String(20), default="Bronze")
     max_dentists = db.Column(db.Integer, default=1)
     is_active = db.Column(db.Boolean, default=True)

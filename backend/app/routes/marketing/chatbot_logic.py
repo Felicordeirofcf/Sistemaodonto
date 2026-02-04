@@ -2,6 +2,7 @@ import logging
 import json
 import uuid
 import re
+import os
 from datetime import datetime, timedelta
 
 # ✅ timezone robusto (Python 3.9+)
@@ -10,9 +11,165 @@ from zoneinfo import ZoneInfo
 from app.models import db, ChatSession, Appointment, Patient, Lead, Clinic, CRMCard, CRMStage
 from .webhook import _send_whatsapp_reply
 
+# OpenAI (ChatGPT) – NUNCA coloque a chave no código; use variável de ambiente
+try:
+    from openai import OpenAI
+except Exception:  # pragma: no cover
+    OpenAI = None
+
 logger = logging.getLogger(__name__)
 
 TZ_SP = ZoneInfo("America/Sao_Paulo")
+
+# ------------------------------------------------------------------------------
+# Config IA (padrões)
+# ------------------------------------------------------------------------------
+DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+DEFAULT_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.4"))
+
+DEFAULT_SYSTEM_PROMPT = os.getenv(
+    "CLINIC_AI_SYSTEM_PROMPT",
+    """
+Você é uma recepcionista profissional de uma clínica odontológica no Brasil.
+
+Objetivo: atender via WhatsApp de forma humana, educada e objetiva, ajudando o paciente a:
+- tirar dúvidas sobre procedimentos,
+- agendar ou remarcar consultas,
+- orientar próximos passos.
+
+Regras:
+- Não invente preços, diagnósticos ou promessas médicas.
+- Se faltar informação, faça perguntas curtas.
+- Sempre que possível, finalize com uma pergunta para avançar.
+""".strip(),
+)
+
+DEFAULT_PROCEDURES = {
+    "aplicação de resina": {
+        "aliases": ["resina", "restauração", "restauracao"],
+        "description": "A aplicação de resina (restauração) é indicada para corrigir cáries pequenas, fraturas ou estética. O dentista remove a parte comprometida, prepara o dente e aplica a resina em camadas, modelando e polindo para ficar natural.",
+        "duration_min": 60,
+    },
+    "botox": {
+        "aliases": ["botox", "toxina botulínica", "toxina botulinica"],
+        "description": "O botox (toxina botulínica) pode ser utilizado para fins estéticos e, em alguns casos, para auxiliar em bruxismo e dor muscular. O profissional avalia, define os pontos de aplicação e realiza microinjeções. As orientações pós-procedimento variam conforme o caso.",
+        "duration_min": 30,
+    },
+    "limpeza de dente": {
+        "aliases": ["limpeza", "profilaxia"],
+        "description": "A limpeza (profilaxia) remove placa bacteriana e tártaro, ajudando a prevenir gengivite e mau hálito. Normalmente inclui avaliação, remoção de tártaro, polimento e orientações de higiene.",
+        "duration_min": 40,
+    },
+    "clareamento": {
+        "aliases": ["clareamento", "branqueamento"],
+        "description": "O clareamento dental pode ser feito em consultório e/ou com moldeiras em casa, conforme avaliação. O dentista analisa a saúde bucal, orienta o método ideal e acompanha para segurança e melhor resultado.",
+        "duration_min": 60,
+    },
+}
+
+
+def _get_ai_client():
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key or not OpenAI:
+        return None
+    return OpenAI(api_key=api_key)
+
+
+def _get_clinic_ai_config(clinic_id: int):
+    """Retorna configurações de IA. Se a clínica não tiver config, usa padrão."""
+    clinic = Clinic.query.get(clinic_id)
+    if not clinic:
+        return {
+            "enabled": False,
+            "model": DEFAULT_OPENAI_MODEL,
+            "temperature": DEFAULT_TEMPERATURE,
+            "system_prompt": DEFAULT_SYSTEM_PROMPT,
+            "procedures": DEFAULT_PROCEDURES,
+            "booking_policy": "",
+            "clinic_name": "",
+        }
+
+    enabled = bool(getattr(clinic, "ai_enabled", True))
+    model = (getattr(clinic, "ai_model", None) or DEFAULT_OPENAI_MODEL).strip()
+    temperature = float(getattr(clinic, "ai_temperature", None) or DEFAULT_TEMPERATURE)
+    system_prompt = (getattr(clinic, "ai_system_prompt", None) or DEFAULT_SYSTEM_PROMPT).strip()
+
+    procs = getattr(clinic, "ai_procedures_json", None)
+    if isinstance(procs, dict) and procs:
+        procedures = procs
+    else:
+        procedures = DEFAULT_PROCEDURES
+
+    return {
+        "enabled": enabled,
+        "model": model,
+        "temperature": temperature,
+        "system_prompt": system_prompt,
+        "procedures": procedures,
+        "booking_policy": (getattr(clinic, "ai_booking_policy", None) or "").strip(),
+        "clinic_name": (getattr(clinic, "name", None) or "").strip(),
+    }
+
+
+def _append_history(data: dict, role: str, content: str, max_items: int = 12):
+    if not isinstance(data, dict):
+        return
+    hist = data.get("history")
+    if not isinstance(hist, list):
+        hist = []
+    hist.append({"role": role, "content": (content or "").strip()[:1500]})
+    data["history"] = hist[-max_items:]
+
+
+def _ai_reply(clinic_id: int, user_text: str, data: dict, push_name: str):
+    cfg = _get_clinic_ai_config(clinic_id)
+    if not cfg.get("enabled"):
+        return None
+
+    client = _get_ai_client()
+    if not client:
+        return None
+
+    # contexto curto + histórico recente
+    clinic = Clinic.query.get(clinic_id)
+    clinic_name = getattr(clinic, "name", "") if clinic else ""
+    context = f"Nome da clínica: {clinic_name}. Nome do paciente: {push_name}."
+
+    # ✅ Enriquecimento do prompt com procedimentos e políticas (editáveis no painel)
+    procedures = cfg.get("procedures") or {}
+    booking_policy = cfg.get("booking_policy") or ""
+
+    system_blocks = [cfg.get("system_prompt") or DEFAULT_SYSTEM_PROMPT, context]
+    if booking_policy:
+        system_blocks.append("POLÍTICAS DE AGENDAMENTO (obrigatório seguir):\n" + str(booking_policy).strip())
+    if isinstance(procedures, dict) and procedures:
+        system_blocks.append(
+            "PROCEDIMENTOS (use para explicar de forma simples e profissional; não invente valores/garantias):\n"
+            + json.dumps(procedures, ensure_ascii=False, indent=2)
+        )
+
+    messages = [{"role": "system", "content": "\n\n".join(system_blocks)}]
+    hist = data.get("history") if isinstance(data, dict) else None
+    if isinstance(hist, list):
+        # já vem no formato role/content
+        for item in hist[-10:]:
+            if isinstance(item, dict) and item.get("role") in ("user", "assistant"):
+                messages.append({"role": item["role"], "content": str(item.get("content", ""))[:1500]})
+
+    messages.append({"role": "user", "content": user_text})
+
+    try:
+        resp = client.chat.completions.create(
+            model=cfg["model"],
+            messages=messages,
+            temperature=cfg["temperature"],
+            max_tokens=280,
+        )
+        out = (resp.choices[0].message.content or "").strip()
+        return out or None
+    except Exception as e:
+        logger.warning(f"⚠️ OpenAI falhou: {e}")
+        return None
 
 # Estados da Máquina de Estados
 STATE_START = 'start'
@@ -92,7 +249,13 @@ def process_chatbot_message(clinic_id, sender_id, message_text, push_name):
             data = {}
             reply = f"Olá {push_name}! Com certeza 😊 Para qual dia você gostaria de agendar?"
         else:
-            reply = f"Olá {push_name}, bem-vindo(a) à nossa clínica! 😊 Você quer *agendar* ou *remarcar* uma consulta?"
+            # ✅ Atendimento inteligente (ChatGPT) para perguntas gerais
+            # (mantemos o fluxo de agendamento por máquina de estados para confiabilidade)
+            # ✅ IA (ChatGPT) para atendimento humanizado quando não é agendamento/remarcação.
+            # A função helper deste módulo é _ai_reply(clinic_id, user_text, data, push_name)
+            # (mantemos o fallback caso a IA esteja desativada/sem chave).
+            ai = _ai_reply(clinic_id=clinic_id, user_text=text, data=data, push_name=push_name)
+            reply = ai or f"Olá {push_name}, bem-vindo(a) à nossa clínica! 😊 Você quer *agendar* ou *remarcar* uma consulta?"
 
     elif state == STATE_AWAITING_DATE:
         parsed_date = parse_pt_br_date(text)
@@ -122,12 +285,18 @@ def process_chatbot_message(clinic_id, sender_id, message_text, push_name):
 
     elif state == STATE_AWAITING_CONFIRM:
         if _is_yes(text):
-            success = create_real_appointment(clinic_id, sender_id, data, push_name)
-            if success:
+            result = create_real_appointment(clinic_id, sender_id, data, push_name)
+            if result.get("ok"):
                 session.state = STATE_DONE
-                reply = "Agendamento realizado com sucesso! Te esperamos lá. 😊"
+                reply = result.get("message") or "Agendamento realizado com sucesso! Te esperamos lá. 😊"
             else:
-                reply = "Houve um erro ao salvar seu agendamento no sistema. Um atendente humano falará com você em breve."
+                if result.get("reason") == "conflict" and result.get("alternatives"):
+                    # mantém a data e pede novo horário
+                    data.pop("time", None)
+                    session.state = STATE_AWAITING_TIME
+                    reply = result.get("message")
+                else:
+                    reply = result.get("message") or "Houve um erro ao salvar seu agendamento no sistema. Um atendente humano falará com você em breve."
         elif _is_no(text):
             session.state = STATE_START
             data = {}
@@ -176,12 +345,17 @@ def process_chatbot_message(clinic_id, sender_id, message_text, push_name):
     elif state == STATE_RESCHEDULE_AWAITING_CONFIRM:
         if _is_yes(text):
             appt_id = data.get('reschedule_appointment_id')
-            success = reschedule_real_appointment(clinic_id, sender_id, appt_id, data, push_name)
-            if success:
+            result = reschedule_real_appointment(clinic_id, sender_id, appt_id, data, push_name)
+            if result.get("ok"):
                 session.state = STATE_DONE
-                reply = "Remarcação realizada com sucesso! 😊"
+                reply = result.get("message") or "Remarcação realizada com sucesso! 😊"
             else:
-                reply = "Não consegui remarcar agora. Um atendente humano falará com você em breve."
+                if result.get("reason") == "conflict" and result.get("alternatives"):
+                    data.pop("time", None)
+                    session.state = STATE_RESCHEDULE_AWAITING_TIME
+                    reply = result.get("message")
+                else:
+                    reply = result.get("message") or "Não consegui remarcar agora. Um atendente humano falará com você em breve."
         elif _is_no(text):
             session.state = STATE_START
             data = {}
@@ -282,47 +456,99 @@ def _find_last_appointment(clinic_id, sender_id):
     else:
         return None
 
-    # pega o mais recente (se existir start_datetime, usa ele; caso contrário date_time)
-    appt = q.order_by(getattr(Appointment, "start_datetime", Appointment.date_time).desc()).first()
-    return appt
+    # pega o mais recente
+    return q.order_by(Appointment.start_datetime.desc()).first()
 
 
-def _make_local_naive_start_end(date_str: str, time_str: str):
+def _make_local_naive_start_end(date_str: str, time_str: str, duration_min: int = 30):
     """
     ✅ Cria datetime NAIVE no fuso de São Paulo (sem tzinfo)
     Isso evita o bug de "dia anterior" quando a UI/front assume local.
     """
     start_str = f"{date_str} {time_str}"
     start_dt = datetime.strptime(start_str, '%Y-%m-%d %H:%M')
-    end_dt = start_dt + timedelta(minutes=30)
+    end_dt = start_dt + timedelta(minutes=max(int(duration_min or 30), 15))
     return start_dt, end_dt
 
 
+def _overlaps(a_start: datetime, a_end: datetime, b_start: datetime, b_end: datetime) -> bool:
+    return a_start < b_end and b_start < a_end
+
+
+def _find_conflict(clinic_id: int, start_dt: datetime, end_dt: datetime, exclude_appointment_id: int | None = None):
+    q = Appointment.query.filter_by(clinic_id=clinic_id)
+    # evita considerar cancelados
+    if hasattr(Appointment, "status"):
+        q = q.filter(Appointment.status != 'cancelled')
+    if exclude_appointment_id:
+        q = q.filter(Appointment.id != exclude_appointment_id)
+
+    # janela de busca: somente eventos que podem cruzar
+    q = q.filter(Appointment.start_datetime < end_dt).filter(Appointment.end_datetime > start_dt)
+    return q.first()
+
+
+def _suggest_next_slots(clinic_id: int, day: datetime, duration_min: int = 30, limit: int = 3):
+    """Sugere próximos horários disponíveis no mesmo dia (08:00–19:00)."""
+    duration_min = max(int(duration_min or 30), 15)
+    start_day = day.replace(hour=8, minute=0, second=0, microsecond=0)
+    end_day = day.replace(hour=19, minute=0, second=0, microsecond=0)
+
+    # começa pelo próximo slot de 30 min
+    cursor = day.replace(second=0, microsecond=0)
+    # arredonda para próximo 30
+    m = cursor.minute
+    if m % 30 != 0:
+        cursor = cursor + timedelta(minutes=(30 - (m % 30)))
+
+    slots = []
+    while cursor < end_day and len(slots) < limit:
+        slot_end = cursor + timedelta(minutes=duration_min)
+        if slot_end > end_day:
+            break
+        conflict = _find_conflict(clinic_id, cursor, slot_end)
+        if not conflict:
+            slots.append((cursor, slot_end))
+        cursor = cursor + timedelta(minutes=30)
+        if cursor < start_day:
+            cursor = start_day
+    return slots
+
+
 def create_real_appointment(clinic_id, sender_id, data, push_name):
+    """Cria agendamento e retorna dict: {ok, reason?, message?, alternatives?}"""
     try:
         patient = Patient.query.filter_by(clinic_id=clinic_id, phone=sender_id).first()
         lead = Lead.query.filter_by(clinic_id=clinic_id, phone=sender_id).first()
 
-        start_dt, end_dt = _make_local_naive_start_end(data['date'], data['time'])
+        duration_min = int(data.get('duration_min') or 30)
+        start_dt, end_dt = _make_local_naive_start_end(data['date'], data['time'], duration_min)
 
-        # ✅ Preenche campos que existem na SUA tabela (screenshot):
-        # - date_time (NOT NULL)
-        # - patient_name, procedure, status, start_datetime, end_datetime, title/description
+        conflict = _find_conflict(clinic_id, start_dt, end_dt)
+        if conflict:
+            alternatives = _suggest_next_slots(clinic_id, start_dt, duration_min, limit=3)
+            return {
+                "ok": False,
+                "reason": "conflict",
+                "message": "Esse horário já está ocupado.",
+                "alternatives": [
+                    {"start": s.strftime('%Y-%m-%d %H:%M'), "label": s.strftime('%H:%M')}
+                    for s, _ in alternatives
+                ],
+            }
+
         new_app = Appointment(
             clinic_id=clinic_id,
             patient_id=patient.id if patient else None,
             lead_id=lead.id if lead else None,
-            patient_name=push_name,
-            procedure="Consulta",
             title=f"Consulta - {push_name}",
             description="Agendado via WhatsApp (chatbot)",
             status='scheduled',
-            date_time=start_dt,          # ✅ importante: NOT NULL
-            start_datetime=start_dt,     # ✅ para telas/queries que usam start_datetime
-            end_datetime=end_dt
+            start_datetime=start_dt,
+            end_datetime=end_dt,
         )
         db.session.add(new_app)
-        db.session.flush()  # garante new_app.id sem precisar commit ainda
+        db.session.flush()
 
         # ✅ mover lead/status + mover card para etapa Agendado
         if lead:
@@ -336,44 +562,52 @@ def create_real_appointment(clinic_id, sender_id, data, push_name):
         db.session.commit()
 
         logger.info(
-            f"TRACE_LOG: lead_id={lead.id if lead else 'N/A'} "
-            f"appointment_id={new_app.id} start={start_dt.isoformat()} end={end_dt.isoformat()}"
+            f"TRACE_LOG: lead_id={lead.id if lead else 'N/A'} appointment_id={new_app.id} "
+            f"start={start_dt.isoformat()} end={end_dt.isoformat()}"
         )
-        return True
+        return {"ok": True, "appointment_id": new_app.id}
 
     except Exception as e:
         logger.error(f"Erro ao criar agendamento: {e}", exc_info=True)
         db.session.rollback()
-        return False
+        return {"ok": False, "reason": "error"}
 
 
 def reschedule_real_appointment(clinic_id, sender_id, appointment_id, data, push_name):
     try:
         if not appointment_id:
-            return False
+            return {"ok": False, "reason": "missing_id"}
 
         appt = Appointment.query.filter_by(clinic_id=clinic_id, id=appointment_id).first()
         if not appt:
-            return False
+            return {"ok": False, "reason": "not_found"}
 
-        start_dt, end_dt = _make_local_naive_start_end(data['date'], data['time'])
+        duration_min = int(data.get('duration_min') or 30)
+        start_dt, end_dt = _make_local_naive_start_end(data['date'], data['time'], duration_min)
 
-        # ✅ atualiza campos principais (incluindo date_time NOT NULL)
-        appt.date_time = start_dt
-        if hasattr(appt, "start_datetime"):
-            appt.start_datetime = start_dt
-        if hasattr(appt, "end_datetime"):
-            appt.end_datetime = end_dt
+        conflict = _find_conflict(clinic_id, start_dt, end_dt, exclude_appointment_id=appt.id)
+        if conflict:
+            alternatives = _suggest_next_slots(clinic_id, start_dt, duration_min, limit=3)
+            return {
+                "ok": False,
+                "reason": "conflict",
+                "message": "Esse horário já está ocupado.",
+                "alternatives": [
+                    {"start": s.strftime('%Y-%m-%d %H:%M'), "label": s.strftime('%H:%M')}
+                    for s, _ in alternatives
+                ],
+            }
 
-        # mantém status
+        appt.start_datetime = start_dt
+        appt.end_datetime = end_dt
         if getattr(appt, "status", None) in (None, "", "pending"):
             appt.status = "scheduled"
 
         db.session.commit()
         logger.info(f"TRACE_LOG_RESCHEDULE: appointment_id={appt.id} new_start={start_dt.isoformat()}")
-        return True
+        return {"ok": True, "appointment_id": appt.id}
 
     except Exception as e:
         logger.error(f"Erro ao remarcar agendamento: {e}", exc_info=True)
         db.session.rollback()
-        return False
+        return {"ok": False, "reason": "error"}
