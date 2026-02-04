@@ -42,6 +42,19 @@ def init_db():
                 "ALTER TABLE patients ADD COLUMN IF NOT EXISTS receive_marketing BOOLEAN DEFAULT TRUE;",
                 "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS patient_id INTEGER;",
                 "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS clinic_id INTEGER;",
+                # Chat Sessions
+                """
+                CREATE TABLE IF NOT EXISTS chat_sessions (
+                    id SERIAL PRIMARY KEY,
+                    clinic_id INTEGER NOT NULL REFERENCES clinics(id),
+                    sender_id VARCHAR(100) NOT NULL,
+                    state VARCHAR(50) DEFAULT 'start',
+                    data JSON DEFAULT '{}',
+                    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(clinic_id, sender_id)
+                );
+                """
             ]
             
             for statement in alter_statements:

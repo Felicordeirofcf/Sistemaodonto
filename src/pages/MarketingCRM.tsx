@@ -4,7 +4,7 @@ import {
   Plus, X, Loader2, 
   Facebook, Target, RefreshCw, 
   Instagram, Wand2, Copy, Image as ImageIcon, 
-  AlertTriangle, LogOut, FileText, CheckCircle2
+  AlertTriangle, LogOut, FileText, CheckCircle2, Trash2
 } from 'lucide-react';
 
 declare global {
@@ -264,6 +264,23 @@ export function MarketingCRM() {
       } catch(e) { alert("Erro ao criar lead."); }
   };
 
+  const handleDeleteLead = async (id: number) => {
+    if (!window.confirm("Tem certeza que deseja excluir este lead?")) return;
+    try {
+      const res = await fetch(`/api/marketing/leads/${id}`, {
+        method: 'DELETE',
+        headers: getHeaders()
+      });
+      if (res.ok) {
+        setLeads(prev => prev.filter(l => l.id !== id));
+      } else {
+        alert("Erro ao excluir lead.");
+      }
+    } catch (e) {
+      alert("Erro de rede ao excluir lead.");
+    }
+  };
+
   const onDragEnd = async (result: DropResult) => { 
       if (!result.destination) return;
       const newStatus = result.destination.droppableId;
@@ -274,8 +291,6 @@ export function MarketingCRM() {
   };
   
   const getColumnLeads = (status: string) => leads.filter(l => l.status === status);
-
-  if (loading && !isConnected) return <div className="flex h-screen items-center justify-center bg-gray-50"><Loader2 className="animate-spin text-blue-600" size={48} /></div>;
 
   return (
     <div className="p-8 w-full h-screen overflow-hidden flex flex-col bg-gray-50 relative font-sans">
@@ -349,8 +364,15 @@ export function MarketingCRM() {
                             <div className={`bg-white p-4 rounded-t-[2rem] border-t-8 ${cfg.color} font-black text-xs uppercase ${cfg.headerColor} flex justify-between`}><span>{cfg.title}</span><span className="bg-gray-100 px-2 rounded text-gray-500 text-[10px]">{getColumnLeads(id).length}</span></div>
                             <Droppable droppableId={id}>{(p, s) => (<div {...p.droppableProps} ref={p.innerRef} className="flex-1 p-4 flex flex-col gap-3 overflow-y-auto">{getColumnLeads(id).map((item, idx) => (
                                 <Draggable key={item.id} draggableId={String(item.id)} index={idx}>{(p, s) => (
-                                    <div ref={p.innerRef} {...p.draggableProps} {...p.dragHandleProps} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 group hover:border-blue-300 transition-all">
-                                        <div className="font-bold text-sm text-gray-800">{item.name}</div>
+                                    <div ref={p.innerRef} {...p.draggableProps} {...p.dragHandleProps} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 group hover:border-blue-300 transition-all relative">
+                                        <button 
+                                          onClick={() => handleDeleteLead(item.id)}
+                                          className="absolute top-2 right-2 p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                                          title="Excluir Lead"
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                        <div className="font-bold text-sm text-gray-800 pr-6">{item.name}</div>
                                         <div className="flex items-center gap-1 text-[10px] text-gray-400 mt-2 uppercase font-bold"><div className={`w-1.5 h-1.5 rounded-full ${item.source === 'Instagram' ? 'bg-purple-500' : item.source === 'Facebook' ? 'bg-blue-600' : 'bg-gray-400'}`}></div>{item.source}</div>
                                     </div>
                                 )}</Draggable>
@@ -398,12 +420,15 @@ export function MarketingCRM() {
       {isModalOpen && (
           <div className="fixed inset-0 z-[100] bg-slate-900/60 flex items-center justify-center backdrop-blur-sm p-4">
               <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl w-full max-w-md animate-in fade-in zoom-in duration-200 border border-white">
-                  <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-black text-gray-800">Novo Potencial Paciente</h3><button onClick={() => setIsModalOpen(false)}><X size={20} className="text-gray-400" /></button></div>
-                  <form onSubmit={handleCreateLead} className="flex flex-col gap-4">
-                      <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Nome Completo</label><input required className="w-full p-3 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={newLead.name} onChange={e => setNewLead({...newLead, name: e.target.value})} /></div>
-                      <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">WhatsApp</label><input className="w-full p-3 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="55..." value={newLead.phone} onChange={e => setNewLead({...newLead, phone: e.target.value})} /></div>
-                      <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Origem</label><select className="w-full p-3 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={newLead.source} onChange={e => setNewLead({...newLead, source: e.target.value})}><option value="Manual">Manual (Balcão/Telefone)</option><option value="Indicação">Indicação</option></select></div>
-                      <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-sm uppercase tracking-widest mt-4 shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all">Salvar Lead</button>
+                  <div className="flex justify-between items-center mb-6">
+                      <h2 className="text-2xl font-black text-gray-900">Novo Lead</h2>
+                      <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><X size={24} /></button>
+                  </div>
+                  <form onSubmit={handleCreateLead} className="space-y-4">
+                      <div><label className="block text-xs font-black text-gray-400 uppercase mb-1">Nome Completo</label><input type="text" required className="w-full p-4 bg-gray-50 border border-gray-100 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 transition-all font-bold" value={newLead.name} onChange={e => setNewLead({...newLead, name: e.target.value})} /></div>
+                      <div><label className="block text-xs font-black text-gray-400 uppercase mb-1">WhatsApp</label><input type="text" required className="w-full p-4 bg-gray-50 border border-gray-100 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 transition-all font-bold" value={newLead.phone} onChange={e => setNewLead({...newLead, phone: e.target.value})} /></div>
+                      <div><label className="block text-xs font-black text-gray-400 uppercase mb-1">Origem</label><select className="w-full p-4 bg-gray-50 border border-gray-100 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 transition-all font-bold" value={newLead.source} onChange={e => setNewLead({...newLead, source: e.target.value})}><option>Manual</option><option>Instagram</option><option>Facebook</option><option>Google</option></select></div>
+                      <button type="submit" className="w-full py-4 bg-gray-900 text-white rounded-2xl font-black shadow-xl hover:bg-gray-800 transition-all active:scale-95 mt-4">Salvar Lead</button>
                   </form>
               </div>
           </div>

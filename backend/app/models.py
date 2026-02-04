@@ -254,6 +254,24 @@ class ScheduledMessage(db.Model):
     contact = db.relationship("WhatsAppContact", backref=db.backref("scheduled", lazy=True))
 
 
+# ✅ NOVA TABELA: Sessões de Chat para Máquina de Estados
+class ChatSession(db.Model):
+    __tablename__ = "chat_sessions"
+    id = db.Column(db.Integer, primary_key=True)
+    clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=False, index=True)
+    sender_id = db.Column(db.String(100), nullable=False, index=True) # JID ou Phone
+    
+    state = db.Column(db.String(50), default='start')
+    data = db.Column(db.JSON, default={})
+    
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    __table_args__ = (
+        db.UniqueConstraint("clinic_id", "sender_id", name="uq_chat_session_clinic_sender"),
+    )
+
+
 # =========================================================
 # 8) CRM & AUTOMAÇÃO
 # =========================================================
@@ -272,7 +290,7 @@ class CRMStage(db.Model):
     __tablename__ = 'crm_stages'
     id = db.Column(db.Integer, primary_key=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey('clinics.id'), nullable=False)
-    nome = db.Column(db.String(50))
+    nome = db.Column(db.String(100))
     ordem = db.Column(db.Integer)
     cor = db.Column(db.String(7))
     is_initial = db.Column(db.Boolean, default=False)

@@ -259,3 +259,42 @@ def get_qr_code(campaign_id):
     except Exception as e:
         logger.exception(f"Erro ao gerar QR: {e}")
         return jsonify({"error": "Erro ao gerar QR"}), 500
+
+# ==============================================================================
+# 4. GESTÃO DE LEADS
+# ==============================================================================
+
+@bp.route('/leads', methods=['GET'])
+@jwt_required()
+def list_leads():
+    clinic_id = _get_clinic_id_from_jwt()
+    leads = Lead.query.filter_by(clinic_id=clinic_id).order_by(Lead.created_at.desc()).all()
+    
+    return jsonify([{
+        "id": l.id,
+        "name": l.name,
+        "phone": l.phone,
+        "status": l.status,
+        "source": l.source,
+        "campaign_id": l.campaign_id,
+        "created_at": l.created_at.isoformat() if l.created_at else None
+    } for l in leads]), 200
+
+@bp.route('/leads/<int:id>', methods=['DELETE'])
+@jwt_required()
+def delete_lead(id):
+    clinic_id = _get_clinic_id_from_jwt()
+    lead = Lead.query.filter_by(id=id, clinic_id=clinic_id).first_or_404()
+
+    try:
+        # Deletar eventos relacionados primeiro
+        LeadEvent.query.filter_by(lead_id=lead.id).delete(synchronize_session=False)
+        
+        db.session.delete(lead)
+        db.session.commit()
+        return jsonify({"message": "Lead excluído com sucesso"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Erro ao excluir lead {id}: {e}")
+        return jsonify({"error": "Falha ao excluir lead"}), 500
