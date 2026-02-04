@@ -68,9 +68,26 @@ def create_app():
         except Exception as e:
             logger.warning(f"⚠️ Aviso ao verificar banco: {e}")
 
-        # ✅ Hotfix de schema para Postgres em produção (Render)
+        # ✅ Hotfix de schema (Postgres em produção / SQLite local)
         try:
-            if db.engine.dialect.name == "postgresql":
+            dialect = db.engine.dialect.name
+
+            def _sqlite_column_exists(table: str, column: str) -> bool:
+                rows = db.session.execute(text(f"PRAGMA table_info({table});")).fetchall()
+                for r in rows:
+                    # sqlite pode retornar tuple (cid, name, type, notnull, dflt_value, pk)
+                    try:
+                        name = r[1]
+                    except Exception:
+                        try:
+                            name = r.name  # type: ignore
+                        except Exception:
+                            name = None
+                    if name == column:
+                        return True
+                return False
+
+            if dialect == "postgresql":
                 schema_fixes = [
                     # Clinics: IA / Atendimento
                     "ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(20);",
@@ -103,6 +120,50 @@ def create_app():
                     except Exception as e:
                         db.session.rollback()
                         logger.warning(f"⚠️ Schema fix falhou: {e}")
+
+            elif dialect == "sqlite":
+                # SQLite não suporta 'IF NOT EXISTS' em todas as versões; então checamos via PRAGMA.
+                sqlite_columns = {
+                    "whatsapp_number": "TEXT",
+                    "ai_enabled": "BOOLEAN DEFAULT 1",
+                    "ai_model": "TEXT DEFAULT 'gpt-4o-mini'",
+                    "ai_temperature": "REAL DEFAULT 0.4",
+                    "ai_system_prompt": "TEXT",
+                    "ai_procedures": "TEXT",
+                    "ai_booking_policy": "TEXT",
+                }
+
+                for col, coldef in sqlite_columns.items():
+                    try:
+                        if not _sqlite_column_exists("clinics", col):
+                            db.session.execute(text(f"ALTER TABLE clinics ADD COLUMN {col} {coldef};"))
+                            db.session.commit()
+                    except Exception as e:
+                        db.session.rollback()
+                        logger.warning(f"⚠️ SQLite schema fix falhou para clinics.{col}: {e}")
+
+                # chat_sessions: cria tabela se necessário
+                try:
+                    db.session.execute(
+                        text(
+                            """
+                            CREATE TABLE IF NOT EXISTS chat_sessions (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                clinic_id INTEGER NOT NULL,
+                                sender_id VARCHAR(100) NOT NULL,
+                                state VARCHAR(50) DEFAULT 'start',
+                                data TEXT DEFAULT '{}',
+                                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                UNIQUE(clinic_id, sender_id)
+                            );
+                            """
+                        )
+                    )
+                    db.session.commit()
+                except Exception as e:
+                    db.session.rollback()
+                    logger.warning(f"⚠️ SQLite schema fix falhou para chat_sessions: {e}")
         except Exception as e:
             logger.warning(f"⚠️ Aviso schema fix: {e}")
 

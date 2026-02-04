@@ -2,10 +2,14 @@ import os
 import json
 import logging
 from datetime import datetime
-from openai import OpenAI
+from app.services.ai_client import get_openai_client
 
 logger = logging.getLogger(__name__)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+
+def _client():
+    # lazy, evita falhas na importação quando OPENAI_API_KEY não está setada
+    return get_openai_client()
 
 MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
@@ -136,7 +140,7 @@ def handle_message(clinic_id: int, phone: str, push_name: str, user_text: str, c
     })
 
     # 1) primeira chamada: o modelo pode pedir tools
-    resp = client.responses.create(
+    resp = _client().responses.create(
         model=MODEL_DEFAULT,
         input=input_messages,
         tools=TOOLS,
@@ -182,7 +186,7 @@ def handle_message(clinic_id: int, phone: str, push_name: str, user_text: str, c
         })
 
     # 3) segunda chamada: agora ele responde confirmando com base no resultado real
-    resp2 = client.responses.create(
+    resp2 = _client().responses.create(
         model=MODEL_DEFAULT,
         input=input_messages,
         tools=TOOLS,

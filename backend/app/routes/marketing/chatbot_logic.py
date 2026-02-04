@@ -11,11 +11,8 @@ from zoneinfo import ZoneInfo
 from app.models import db, ChatSession, Appointment, Patient, Lead, Clinic, CRMCard, CRMStage
 from .webhook import _send_whatsapp_reply
 
-# OpenAI (ChatGPT) – NUNCA coloque a chave no código; use variável de ambiente
-try:
-    from openai import OpenAI
-except Exception:  # pragma: no cover
-    OpenAI = None
+# ✅ Serviço central de IA (OpenAI)
+from app.services.ai_client import chat_reply
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +63,6 @@ DEFAULT_PROCEDURES = {
         "duration_min": 60,
     },
 }
-
-
-def _get_ai_client():
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key or not OpenAI:
-        return None
-    return OpenAI(api_key=api_key)
 
 
 def _get_clinic_ai_config(clinic_id: int):
@@ -128,10 +118,6 @@ def _ai_reply(clinic_id: int, user_text: str, data: dict, push_name: str):
     if not cfg.get("enabled"):
         return None
 
-    client = _get_ai_client()
-    if not client:
-        return None
-
     # contexto curto + histórico recente
     clinic = Clinic.query.get(clinic_id)
     clinic_name = getattr(clinic, "name", "") if clinic else ""
@@ -158,17 +144,19 @@ def _ai_reply(clinic_id: int, user_text: str, data: dict, push_name: str):
             if isinstance(item, dict) and item.get("role") in ("user", "assistant"):
                 messages.append({"role": item["role"], "content": str(item.get("content", ""))[:1500]})
 
-    messages.append({"role": "user", "content": user_text})
-
     try:
-        resp = client.chat.completions.create(
-            model=cfg["model"],
-            messages=messages,
-            temperature=cfg["temperature"],
-            max_tokens=280,
+        out = chat_reply(
+            system_prompt="\n\n".join(system_blocks),
+            user_text=user_text,
+            history={
+                # histórico apenas (não repete a mensagem atual)
+                "messages": messages[1:],
+                "model": cfg["model"],
+                "temperature": cfg["temperature"],
+                "max_tokens": 280,
+            },
         )
-        out = (resp.choices[0].message.content or "").strip()
-        return out or None
+        return (out or "").strip() or None
     except Exception as e:
         logger.warning(f"⚠️ OpenAI falhou: {e}")
         return None
@@ -263,7 +251,14 @@ def process_chatbot_message(clinic_id, sender_id, message_text, push_name):
             # A função helper deste módulo é _ai_reply(clinic_id, user_text, data, push_name)
             # (mantemos o fallback caso a IA esteja desativada/sem chave).
             ai = _ai_reply(clinic_id=clinic_id, user_text=text, data=data, push_name=push_name)
-            reply = ai or f"Olá {push_name}, bem-vindo(a) à nossa clínica! 😊 Você quer *agendar* ou *remarcar* uma consulta?"
+            if ai:
+                reply = ai
+            else:
+                # 🔻 fallback humano se IA estiver desativada ou sem OPENAI_API_KEY
+                reply = (
+                    f"Olá {push_name}! 😊 No momento vou encaminhar sua mensagem para um atendente humano. "
+                    "Enquanto isso, você quer *agendar* ou *remarcar* uma consulta?"
+                )
 
     elif state == STATE_AWAITING_DATE:
         parsed_date = parse_pt_br_date(text)

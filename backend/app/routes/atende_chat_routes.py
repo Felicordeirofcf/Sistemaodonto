@@ -1,81 +1,64 @@
 from flask import Blueprint, request, jsonify
-import google.generativeai as genai
-import os
-from PIL import Image
-import io
-import base64
 
-# --- SUA API KEY ---
-GOOGLE_API_KEY = "AIzaSyBAXqKJZ9nCyXxPSbzmSZHh2VkYoaezcT4" 
-genai.configure(api_key=GOOGLE_API_KEY)
+from app.services.ai_client import chat_reply, vision_reply, get_openai_client
 
-atende_chat_bp = Blueprint('atende_chat', __name__)
+atende_chat_bp = Blueprint("atende_chat", __name__)
 
 # Prompt para conversa normal
-TEXT_PROMPT = "Você é a Ana, Consultora Estética da OdontoSys. Analise a imagem e seja simpática."
+TEXT_PROMPT = (
+    "Você é a Ana, Consultora Estética da OdontoSys. "
+    "Responda em pt-BR, seja simpática, objetiva e profissional. "
+    "Nunca invente diagnósticos, preços ou promessas médicas."
+)
 
-# Prompt para o "Artista"
-IMAGE_PROMPT = """
-Atue como um simulador odontológico avançado.
-Gere uma NOVA imagem baseada na foto fornecida.
-A nova imagem deve mostrar a mesma pessoa, mas com um SORRISO PERFEITO:
-- Dentes alinhados, brancos (tom natural) e simétricos.
-- Gengiva saudável e harmoniosa.
-- Mantenha o resto do rosto e iluminação idênticos.
-O resultado deve ser fotorrealista.
-"""
+# Prompt para análise de imagem (visão)
+VISION_PROMPT = (
+    "Você é uma consultora de clínica odontológica. "
+    "Ao receber uma foto de sorriso/dentes, faça uma análise geral (sem diagnóstico), "
+    "explique possibilidades de tratamento (ex: clareamento, facetas, alinhadores), "
+    "faça 2-4 perguntas rápidas para coletar informações e sugerir agendamento."
+)
 
-@atende_chat_bp.route('/chat/message', methods=['POST'])
-def chat_message():
-    image_file = request.files.get('image')
-    text_message = request.form.get('message', '')
 
-    # Se não tiver imagem, conversa normal com o modelo rápido
-    if not image_file:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(f"{TEXT_PROMPT}\nCliente: {text_message}")
-        return jsonify({'response': response.text})
+@atende_chat_bp.get("/ai/health")
+def ai_health():
+    """Diagnóstico de IA.
 
-    # --- SE TIVER IMAGEM: TENTA GERAR SIMULAÇÃO ---
+    Retorna 200 se OPENAI_API_KEY estiver configurada.
+    Retorna 500 com mensagem clara se faltar a chave.
+    """
+    import os
+
     try:
-        print("Tentando gerar imagem com gemini-2.0-flash-exp...")
-        img_bytes = image_file.read()
-        input_img = Image.open(io.BytesIO(img_bytes))
-
-        # Modelo capaz de gerar imagens
-        gen_model = genai.GenerativeModel('gemini-2.0-flash-exp')
-        
-        response = gen_model.generate_content([IMAGE_PROMPT, input_img])
-        
-        # Tenta extrair a imagem gerada
-        try:
-            # O Gemini retorna a imagem em partes. Precisamos pegar os bytes.
-            img_data = response.candidates[0].content.parts[0].inline_data.data
-            base64_img = base64.b64encode(img_data).decode('utf-8')
-            image_url = f"data:image/png;base64,{base64_img}"
-            
-            return jsonify({
-                'response': "✨ Aqui está uma simulação de como seu sorriso pode ficar! Lembre-se que o resultado real depende da avaliação clínica.",
-                'image': image_url # Manda a imagem para o site
-            })
-        except:
-            # Se o modelo respondeu texto em vez de imagem (acontece às vezes)
-            raise Exception("O modelo não gerou pixels, apenas texto.")
-
+        get_openai_client()
+        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        return jsonify({"ok": True, "provider": "openai", "model": model}), 200
     except Exception as e:
-        # --- PLANO B: FALLBACK PARA TEXTO ---
-        print(f"Falha na geração de imagem ({str(e)}). Caindo para análise de texto.")
-        
-        # Se falhou (Cota ou Erro Técnico), usa o modelo 2.5-Flash para descrever
-        # Assim o usuário não fica na mão
-        fallback_model = genai.GenerativeModel('gemini-2.5-flash')
-        response = fallback_model.generate_content([
-            "Analise tecnicamente este sorriso e descreva como ficaria após o tratamento (facetas/clareamento).", 
-            input_img
-        ])
-        
-        aviso = ""
-        if "429" in str(e) or "Quota" in str(e):
-            aviso = "⚠️ (O sistema de simulação visual está sobrecarregado agora, mas fiz a análise técnica abaixo):\n\n"
-            
-        return jsonify({'response': aviso + response.text})
+        return jsonify({"ok": False, "provider": "openai", "error": str(e)}), 500
+
+
+@atende_chat_bp.route("/chat/message", methods=["POST"])
+def chat_message():
+    """Rota de chat (site).
+
+    - Sem imagem: usa chat_reply.
+    - Com imagem: usa vision_reply (apenas análise; não gera imagem).
+    """
+    image_file = request.files.get("image")
+    text_message = request.form.get("message", "")
+
+    if not image_file:
+        try:
+            out = chat_reply(TEXT_PROMPT, text_message)
+            return jsonify({"response": out}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    try:
+        img_bytes = image_file.read()
+        mime = image_file.mimetype or "image/jpeg"
+        out = vision_reply(VISION_PROMPT, text_message or "Analise a imagem.", img_bytes, mime)
+        # mantém compatibilidade do front (campo image existia antes)
+        return jsonify({"response": out, "image": None}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
