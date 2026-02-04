@@ -368,21 +368,25 @@ export function MarketingCRM() {
                             <div className={`bg-white p-4 rounded-t-[2rem] border-t-8 ${cfg.color} font-black text-xs uppercase ${cfg.headerColor} flex justify-between`}><span>{cfg.title}</span><span className="bg-gray-100 px-2 rounded text-gray-500 text-[10px]">{getColumnLeads(id).length}</span></div>
                             <Droppable droppableId={id}>{(p, s) => (<div {...p.droppableProps} ref={p.innerRef} className="flex-1 p-4 flex flex-col gap-3 overflow-y-auto">{getColumnLeads(id).map((item, idx) => (
                                 <Draggable key={item.id} draggableId={String(item.id)} index={idx}>{(p, s) => (
-                                    <div ref={p.innerRef} {...p.draggableProps} {...p.dragHandleProps} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 group hover:border-blue-300 transition-all relative">
+                                    <div ref={p.innerRef} {...p.draggableProps} {...p.dragHandleProps} className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-blue-400 group hover:border-blue-500 transition-all relative mb-2">
                                         <button 
-                                          onClick={() => {
+                                          onClick={(e) => {
+                                            e.stopPropagation();
                                             if (window.confirm("Tem certeza que deseja excluir este lead?")) {
                                               handleDeleteLead(item.id);
                                             }
                                           }}
                                           disabled={isDeleting === item.id}
-                                          className="absolute top-2 right-2 p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
+                                          className="absolute top-2 right-2 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all z-10"
                                           title="Excluir Lead"
                                         >
                                           {isDeleting === item.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                                         </button>
-                                        <div className="font-bold text-sm text-gray-800 pr-6">{item.name}</div>
-                                        <div className="flex items-center gap-1 text-[10px] text-gray-400 mt-2 uppercase font-bold"><div className={`w-1.5 h-1.5 rounded-full ${item.source === 'Instagram' ? 'bg-purple-500' : item.source === 'Facebook' ? 'bg-blue-600' : 'bg-gray-400'}`}></div>{item.source}</div>
+                                        <div className="font-bold text-base text-gray-900 mb-1">{item.name}</div>
+                                        <div className="flex justify-between items-center">
+                                            <div className="text-xs text-gray-500 font-medium">{item.phone || 'Sem telefone'}</div>
+                                            <div className="text-[10px] text-gray-400 font-bold">{new Date().toLocaleDateString('pt-BR', {day: '2-digit', month: '2-digit'})} {new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'})}</div>
+                                        </div>
                                     </div>
                                 )}</Draggable>
                             ))}{p.placeholder}</div>)}</Droppable>
