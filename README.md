@@ -1,4 +1,4 @@
-Aqui está o conteúdo do seu README.md formatado em Markdown. Você pode copiar e colar diretamente no seu arquivo para documentar o projeto de forma profissional.
+
 
 🦷 Sistema Odonto SaaS - Gestão Inteligente & IA
 Este é um ecossistema completo para gestão de clínicas odontológicas, focado em automação de vendas, controle de lucro líquido real e agendamento inteligente via IA. O sistema foi desenhado sob a arquitetura Multi-tenant, garantindo que os dados de cada clínica sejam isolados e seguros.
